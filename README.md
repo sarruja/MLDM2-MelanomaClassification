@@ -20,18 +20,18 @@ Dieses Projekt ist Teil des Moduls **MLDM2** und hat zum Ziel, ein Deep Learning
 ## 🗂️ Projektstruktur
 
 ```
-melanoma-classification/
+MLDM2-MelanomaClassification/
 ├── data/               # Daten (nicht ins Repo pushen!)
 │   ├── images/         # 224x224 vorverarbeitete Bilder
-│   └── metadata/       # CSV mit Patientenmetadaten
-├── notebooks/          # Explorative Analysen & Experimente
-├── src/
-│   ├── datamodule.py   # LightningDataModule
-│   ├── model.py        # LightningModule (CNN / Transformer)
-│   ├── transforms.py   # Augmentationen
-│   └── train.py        # Trainingsskript
+│   └── train.csv       # Labels & Metadaten
 ├── checkpoints/        # Gespeicherte Modellgewichte
+├── tb_logs/            # TensorBoard Logs
 ├── reports/            # Abschlussbericht (PDF)
+├── datamodule.py       # LightningDataModule (Daten laden & augmentieren)
+├── model.py            # LightningModule (EfficientNet Architektur)
+├── train.py            # Training starten
+├── requirements.txt    # Package-Versionen
+├── .gitignore
 └── README.md
 ```
 
@@ -39,20 +39,61 @@ melanoma-classification/
 
 ## 📦 Setup
 
+### 1. Repo klonen
 ```bash
-# Dependencies installieren
-pip install lightning torch torchvision timm pandas scikit-learn albumentations
+git clone https://github.com/sarruja/MLDM2-MelanomaClassification.git
+cd MLDM2-MelanomaClassification
+```
 
-# Daten herunterladen (Kaggle API benötigt)
-kaggle datasets download -d arroqc/siic-isic-224x224-images
+### 2. Virtual Environment erstellen & aktivieren
+
+**Windows:**
+```bash
+py -m venv melanoma-env
+
+# Falls Fehler mit PowerShell (nur Windows):
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+
+melanoma-env\Scripts\activate
+```
+
+**Mac/Linux:**
+```bash
+python3 -m venv melanoma-env
+source melanoma-env/bin/activate
+```
+
+Wenn aktiviert siehst du `(melanoma-env)` vor dem Prompt. ✅
+
+### 3. Dependencies installieren
+```bash
+pip install -r requirements.txt
+
+```
+oder pip install lightning timm torchmetrics albumentations pandas scikit-learn wenn no
+
+### 4. Daten herunterladen (Kaggle API benötigt)
+```bash
+# kaggle.json API-Key unter: kaggle.com → Settings → API → Create New Token
+# Key ablegen unter: C:\Users\<name>\.kaggle\kaggle.json
+
+kaggle datasets download -d arroqc/siic-isic-224x224-images -p data/
 ```
 
 ---
 
 ## 🚀 Training starten
 
+**Lokal testen** (schnell, nur wenige Batches):
 ```bash
-python src/train.py
+# In train.py: "fast_dev": True setzen
+py train.py
+```
+
+**Echtes Training** (auf LightningAI mit GPU):
+```bash
+# In train.py: "fast_dev": False setzen
+python train.py
 ```
 
 ---
@@ -109,5 +150,6 @@ python src/train.py
 - [timm – Pretrained Image Models](https://huggingface.co/docs/timm/index)
 
 ---
+
 
 > **Hinweis:** Originallösungen von Kaggle können zur Inspiration genutzt werden, die finale Lösung muss aber eigenständig sein.
