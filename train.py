@@ -24,7 +24,7 @@ from model import MelanomaModel
 CONFIG = {
     # --- Pfade ---
     "csv_path":   "data/train.csv",         # Kaggle CSV mit Labels
-    "image_dir":  "data/images/",           # Ordner mit den .jpg Bildern
+    "image_dir": "data/train/",           # Ordner mit den .jpg Bildern
 
     # --- Training ---
     "batch_size":    32,                    # Kleiner wenn GPU-Speicher voll

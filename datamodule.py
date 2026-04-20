@@ -45,7 +45,7 @@ class MelanomaDataset(Dataset):
         row = self.df.iloc[idx]
 
         # Bild laden
-        img_path = os.path.join(self.image_dir, row["image_name"] + ".jpg")
+        img_path = os.path.join(self.image_dir, row["image_name"] + ".png")
         image = Image.open(img_path).convert("RGB")
 
         # Transformationen anwenden (z.B. Augmentation beim Training)
