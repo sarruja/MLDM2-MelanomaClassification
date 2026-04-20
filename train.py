@@ -42,7 +42,7 @@ CONFIG = {
 
     # --- Lokal testen ---
     # Auf True setzen um nur mit 10% der Daten zu trainieren (schnell zum Debuggen!)
-    "fast_dev": False,
+    "fast_dev": True,
 }
 
 
@@ -142,7 +142,8 @@ def main():
     # (Lesson 1 - Train/Val/Test Split)
     # -------------------------------------------------------
     print("\n📊 Evaluation auf Test-Set...\n")
-    trainer.test(model, datamodule=datamodule, ckpt_path="best")  # bestes Checkpoint laden
+    if not CONFIG["fast_dev"]:
+        trainer.test(model, datamodule=datamodule, ckpt_path="best")  # bestes Checkpoint laden
 
 
 if __name__ == "__main__":
