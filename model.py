@@ -1,195 +1,244 @@
 # =============================================================================
-# model.py
-# Zuständig für: Modellarchitektur, Loss, Optimizer, Metriken
-# Lesson 3: Transfer Learning, Regularization (Dropout)
-# Lesson 4: CNNs
-# Lesson 5: Residual Networks (EfficientNet baut darauf auf)
+# model.py  –  Multimodales Melanom-Klassifikationsmodell
+#
+# Was dieses File macht:
+#   1. Lädt EfficientNet-B0 als vortrainiertes CNN (Transfer Learning)
+#   2. Verarbeitet Patientenmetadaten (Alter, Geschlecht, Körperstelle) separat
+#   3. Kombiniert (fusioniert) Bild-Features + Metadaten → finale Vorhersage
+#   4. Kümmert sich um Loss, Optimizer und Metriken (AUC-ROC, F1)
+#
+# Relevante Lektionen:
+#   Lesson 3 – Transfer Learning, Dropout, Regularization
+#   Lesson 4 – CNNs (EfficientNet ist ein CNN)
+#   Lesson 5 – Residual Networks (EfficientNet baut auf ResNet-Ideen auf)
 # =============================================================================
 
 import torch
 import torch.nn as nn
 import lightning as L
-import timm  # Library mit vielen vortrainierten Modellen (EfficientNet, ResNet, ViT, ...)
+import timm
 
-from torchmetrics import AUROC, F1Score, Accuracy
-from torchmetrics.classification import BinaryConfusionMatrix
+from torchmetrics import AUROC, F1Score
 
 
 # =============================================================================
-# MODELL KLASSE (Lightning)
-# LightningModule kapselt: forward pass, loss, optimizer, metriken
-# Lightning ruft training_step(), validation_step() etc. automatisch auf
+# ARCHITEKTUR-ÜBERSICHT (Multimodal Fusion)
+#
+#   Bild (224x224x3)
+#       │
+#   EfficientNet-B0 Backbone (CNN, vortrainiert auf ImageNet)
+#       │
+#   Global Average Pooling
+#       │
+#   Image Feature Vector  (1280-dim)
+#       │                               Metadaten (Alter, Geschlecht, Körperstelle)
+#       │                                   │
+#       │                               Metadata MLP (kleines Netz)
+#       │                                   │
+#       │                               Metadata Feature Vector (32-dim)
+#       │                                   │
+#       └──────────── Konkatenation ────────┘
+#                           │
+#                   [1280 + 32] = 1312-dim
+#                           │
+#                   Classifier Head (FC-Layer)
+#                           │
+#                   Output: 1 Wert (logit → Wahrscheinlichkeit Melanom)
+#
 # =============================================================================
+
 
 class MelanomaModel(L.LightningModule):
-    def __init__(self, learning_rate=1e-4, pos_weight=50.0, dropout=0.3):
+
+    def __init__(self, metadata_dim=9, learning_rate=1e-4, pos_weight=50.0, dropout=0.3):
         """
-        learning_rate : Lernrate für den Optimizer (Lesson 3 - Hyperparameter Tuning)
-        pos_weight    : Gewicht für positive Klasse im Loss (Class Imbalance)
-                        Faustregel: ~98/2 = 49 → wir nehmen 50
-        dropout       : Dropout-Rate (Lesson 3 - Regularization)
+        metadata_dim  : Anzahl Input-Features nach Preprocessing der Metadaten
+                        Alter (1) + Geschlecht one-hot (2) + Körperstelle one-hot (6) = 9
+        learning_rate : Lernrate für Adam Optimizer
+        pos_weight    : Gewicht für positive Klasse (Melanom) im Loss
+                        Faustregel: neg/pos = 98/2 ≈ 50
+        dropout       : Dropout-Rate gegen Overfitting (Lesson 3)
         """
         super().__init__()
-        self.save_hyperparameters()  # speichert alle __init__ Parameter automatisch
+        self.save_hyperparameters()  # speichert alle Parameter für Checkpoints
 
-        # -------------------------------------------------------
-        # BACKBONE: EfficientNet-B0 (Transfer Learning)
-        # (Lesson 3 - Transfer Learning, Lesson 4 - CNNs, Lesson 5 - ResNets)
+        # ------------------------------------------------------------------
+        # 1. BACKBONE: EfficientNet-B0 (Transfer Learning)
         #
-        # Was ist Transfer Learning?
-        # EfficientNet wurde auf ImageNet (1.2 Mio Bilder, 1000 Klassen) vortrainiert.
-        # Es hat bereits gelernt: Kanten, Texturen, Formen, komplexe Muster erkennen.
-        # Wir nehmen diese "Basis" und passen sie an unsere Aufgabe (Melanom) an.
-        # → Viel besser als von Null trainieren, besonders mit begrenzten Daten!
-        #
-        # EfficientNet Besonderheit:
-        # Skaliert Width, Depth und Resolution gleichzeitig → sehr effizient
-        # B0 = kleinste Variante, ideal zum Starten
-        # -------------------------------------------------------
+        # EfficientNet wurde auf ImageNet vortrainiert (1.2 Mio Bilder).
+        # Es hat bereits gelernt: Kanten, Texturen, Formen, komplexe Muster.
+        # pretrained=True  → lädt diese Gewichte herunter (nicht selbst trainieren!)
+        # num_classes=0    → entfernt den originalen Classifier-Head (1000 ImageNet-Klassen)
+        # global_pool="avg"→ macht aus dem letzten Feature-Map einen Vektor (Average Pooling)
+        # ------------------------------------------------------------------
         self.backbone = timm.create_model(
             "efficientnet_b0",
-            pretrained=True,    # ImageNet Gewichte laden (Transfer Learning!)
-            num_classes=0,      # Classifier-Head entfernen (wir fügen unseren eigenen hinzu)
-            global_pool="avg"   # Global Average Pooling nach dem letzten Conv-Layer
+            pretrained=True,
+            num_classes=0,
+            global_pool="avg"
         )
+        backbone_out = self.backbone.num_features  # = 1280 bei EfficientNet-B0
 
-        # Grösse des Feature-Vektors aus dem Backbone (EfficientNet-B0 → 1280)
-        backbone_out = self.backbone.num_features  # = 1280
-
-        # -------------------------------------------------------
-        # CLASSIFIER HEAD
-        # Nimmt die 1280 Features vom Backbone und macht daraus eine Vorhersage
-        # Dropout = Regularisierung gegen Overfitting (Lesson 3 - Dropout)
-        # -------------------------------------------------------
-        self.classifier = nn.Sequential(
-            nn.Dropout(p=dropout),          # Zufällig Neuronen deaktivieren → robuster
-            nn.Linear(backbone_out, 256),   # Fully Connected Layer: 1280 → 256
-            nn.ReLU(),                      # Aktivierungsfunktion (nicht-linear)
-            nn.Dropout(p=dropout),
-            nn.Linear(256, 1)               # Output: 1 Wert (Wahrscheinlichkeit Melanom)
-            # Kein Sigmoid hier! BCEWithLogitsLoss macht das intern (numerisch stabiler)
-        )
-
-        # -------------------------------------------------------
-        # LOSS FUNKTION: Binary Cross Entropy mit pos_weight
-        # (Lesson 2 - Loss Functions)
+        # ------------------------------------------------------------------
+        # 2. METADATA MLP (kleines Netz nur für Metadaten)
         #
-        # BCEWithLogitsLoss = BCE + Sigmoid kombiniert (stabiler als getrennt)
-        # pos_weight: positive Samples (Melanom) werden stärker gewichtet
-        # → Modell wird stärker bestraft wenn es ein Melanom verpasst
-        # -------------------------------------------------------
+        # Die Metadaten (Alter, Geschlecht, Körperstelle) sind numerisch/kategorisch.
+        # Ein kleines Fully-Connected-Netz verarbeitet diese separat zu einem
+        # kompakten Feature-Vektor (32-dim), bevor wir ihn mit den Bild-Features fusionieren.
+        #
+        # Warum nicht direkt zusammenwerfen?
+        # → Das Bild hat 1280 Werte, Metadaten nur 9. Direktes Concatenate würde
+        #   die Metadaten "begraben". Das MLP gibt ihnen einen eigenen Lernpfad.
+        # ------------------------------------------------------------------
+        self.metadata_mlp = nn.Sequential(
+            nn.Linear(metadata_dim, 64),   # 9 → 64
+            nn.ReLU(),
+            nn.Dropout(p=dropout),
+            nn.Linear(64, 32),             # 64 → 32
+            nn.ReLU()
+        )
+        metadata_out = 32  # Ausgabegrösse des Metadata MLP
+
+        # ------------------------------------------------------------------
+        # 3. FUSION CLASSIFIER HEAD
+        #
+        # Hier werden Bild-Features (1280) und Metadaten-Features (32) zusammengeführt.
+        # Konkatenation: einfach nebeneinanderlegen → Vektor der Länge 1280+32 = 1312
+        #
+        # Danach: zwei FC-Layer die den kombinierten Vektor auf 1 Wert reduzieren.
+        # Dieser 1 Wert ist der "Logit" – via Sigmoid wird er zur Wahrscheinlichkeit.
+        # (Kein Sigmoid hier, weil BCEWithLogitsLoss das intern macht → numerisch stabiler)
+        # ------------------------------------------------------------------
+        fusion_in = backbone_out + metadata_out  # 1280 + 32 = 1312
+
+        self.classifier = nn.Sequential(
+            nn.Dropout(p=dropout),
+            nn.Linear(fusion_in, 256),     # 1312 → 256
+            nn.ReLU(),
+            nn.Dropout(p=dropout),
+            nn.Linear(256, 1)              # 256 → 1 (Logit, kein Sigmoid!)
+        )
+
+        # ------------------------------------------------------------------
+        # 4. LOSS-FUNKTION: BCEWithLogitsLoss mit pos_weight
+        #
+        # BCE = Binary Cross Entropy (standard für binäre Klassifikation)
+        # WithLogits = erwartet Logits (nicht Sigmoid-Output) → stabiler
+        # pos_weight = 50 → ein falsch klassifiziertes Melanom wird 50x stärker
+        #                    bestraft als ein falsch klassifiziertes Nicht-Melanom
+        #
+        # Ohne pos_weight: Modell lernt "sag immer 0" → 98% Accuracy aber nutzlos!
+        # ------------------------------------------------------------------
         self.criterion = nn.BCEWithLogitsLoss(
             pos_weight=torch.tensor([pos_weight])
         )
 
-        # -------------------------------------------------------
-        # METRIKEN
-        # Accuracy allein ist bei Class Imbalance irreführend!
-        # (98% Accuracy möglich wenn man einfach immer "negativ" sagt)
-        # AUC-ROC ist die wichtigste Metrik bei diesem Kaggle-Wettbewerb
-        # -------------------------------------------------------
-        self.train_auc = AUROC(task="binary")
-        self.val_auc   = AUROC(task="binary")
-        self.val_f1    = F1Score(task="binary", threshold=0.5)
+        # ------------------------------------------------------------------
+        # 5. METRIKEN
+        #
+        # Accuracy allein ist bei Klassenungleichgewicht wertlos (98% ohne Training!).
+        # Deshalb:
+        #   AUC-ROC: Wie gut trennt das Modell positiv/negativ bei allen Schwellwerten?
+        #            1.0 = perfekt, 0.5 = zufällig
+        #   F1-Score: Harmonisches Mittel aus Precision & Recall
+        #             Gut wenn sowohl False Positives als auch False Negatives wichtig sind
+        # ------------------------------------------------------------------
+        self.val_auc = AUROC(task="binary")
+        self.val_f1  = F1Score(task="binary")
+        self.test_auc = AUROC(task="binary")
+        self.test_f1  = F1Score(task="binary")
 
-    def forward(self, x):
-        """
-        Forward Pass: Bild rein → Vorhersage raus
-        x: Batch von Bildern, Shape: [batch_size, 3, 224, 224]
-        """
-        features = self.backbone(x)      # CNN extrahiert Features: [batch_size, 1280]
-        logits = self.classifier(features)  # Classifier: [batch_size, 1]
-        return logits.squeeze(1)         # → [batch_size]
+    # ------------------------------------------------------------------
+    # FORWARD PASS
+    # Wird bei jedem Schritt aufgerufen: Eingabe → Ausgabe
+    # images   : Tensor [batch_size, 3, 224, 224]
+    # metadata : Tensor [batch_size, metadata_dim]
+    # ------------------------------------------------------------------
+    def forward(self, images, metadata):
+        # Bild durch EfficientNet → Feature-Vektor [batch, 1280]
+        image_features = self.backbone(images)
 
+        # Metadaten durch MLP → Feature-Vektor [batch, 32]
+        meta_features = self.metadata_mlp(metadata)
+
+        # Beide Vektoren nebeneinander hängen → [batch, 1312]
+        combined = torch.cat([image_features, meta_features], dim=1)
+
+        # Durch Classifier → [batch, 1] (ein Logit pro Sample)
+        logits = self.classifier(combined)
+        return logits.squeeze(1)  # → [batch] (1D)
+
+    # ------------------------------------------------------------------
+    # TRAINING STEP
+    # Lightning ruft das automatisch für jeden Batch auf
+    # ------------------------------------------------------------------
     def training_step(self, batch, batch_idx):
-        """
-        Wird von Lightning für jeden Trainings-Batch aufgerufen.
-        Berechnet Loss und Metriken für einen Batch.
-        """
-        images, labels = batch
-        logits = self(images)            # Forward Pass
-
-        # Loss berechnen
-        loss = self.criterion(logits, labels)
-
-        # Wahrscheinlichkeiten für Metriken (Sigmoid wandelt Logits in 0-1 um)
-        probs = torch.sigmoid(logits)
-        self.train_auc.update(probs, labels.int())
-
-        # Werte loggen (erscheinen in TensorBoard / W&B)
+        images, metadata, labels = batch
+        logits = self(images, metadata)
+        loss = self.criterion(logits, labels.float())
         self.log("train_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
         return loss
 
-    def on_train_epoch_end(self):
-        # AUC am Ende jeder Epoche loggen und zurücksetzen
-        self.log("train_auc", self.train_auc.compute(), prog_bar=True)
-        self.train_auc.reset()
-
+    # ------------------------------------------------------------------
+    # VALIDATION STEP
+    # Nach jeder Epoche auf dem Validierungsset
+    # ------------------------------------------------------------------
     def validation_step(self, batch, batch_idx):
-        """
-        Wird von Lightning für jeden Validation-Batch aufgerufen.
-        Kein Gradient-Update hier! (torch.no_grad() macht Lightning automatisch)
-        """
-        images, labels = batch
-        logits = self(images)
+        images, metadata, labels = batch
+        logits = self(images, metadata)
+        loss = self.criterion(logits, labels.float())
 
-        loss = self.criterion(logits, labels)
+        # Sigmoid: Logits → Wahrscheinlichkeiten (0–1) für Metriken
         probs = torch.sigmoid(logits)
 
-        self.val_auc.update(probs, labels.int())
-        self.val_f1.update(probs, labels.int())
-
-        self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
-        return loss
+        self.val_auc.update(probs, labels)
+        self.val_f1.update(probs, labels)
+        self.log("val_loss", loss, on_epoch=True, prog_bar=True)
 
     def on_validation_epoch_end(self):
-        # Metriken am Ende jeder Validation-Epoche loggen
-        self.log("val_auc", self.val_auc.compute(), prog_bar=True)
-        self.log("val_f1",  self.val_f1.compute(),  prog_bar=True)
+        auc = self.val_auc.compute()
+        f1  = self.val_f1.compute()
+        self.log("val_auc", auc, prog_bar=True)
+        self.log("val_f1",  f1,  prog_bar=True)
         self.val_auc.reset()
         self.val_f1.reset()
 
+    # ------------------------------------------------------------------
+    # TEST STEP
+    # Einmal am Ende auf dem Test-Set (nie während dem Training anschauen!)
+    # ------------------------------------------------------------------
     def test_step(self, batch, batch_idx):
-        """
-        Wird von Lightning für den Test-Set aufgerufen (nur einmal am Ende).
-        """
-        images, labels = batch
-        logits = self(images)
+        images, metadata, labels = batch
+        logits = self(images, metadata)
         probs = torch.sigmoid(logits)
-        self.val_auc.update(probs, labels.int())
-        self.val_f1.update(probs, labels.int())
+        self.test_auc.update(probs, labels)
+        self.test_f1.update(probs, labels)
 
     def on_test_epoch_end(self):
-        self.log("test_auc", self.val_auc.compute())
-        self.log("test_f1",  self.val_f1.compute())
-        self.val_auc.reset()
-        self.val_f1.reset()
+        auc = self.test_auc.compute()
+        f1  = self.test_f1.compute()
+        self.log("test_auc", auc)
+        self.log("test_f1",  f1)
+        print(f"\n✅ Test AUC-ROC : {auc:.4f}")
+        print(f"✅ Test F1-Score : {f1:.4f}")
+        self.test_auc.reset()
+        self.test_f1.reset()
 
+    # ------------------------------------------------------------------
+    # OPTIMIZER & LR SCHEDULER
+    # Adam ist der Standard-Optimizer für Deep Learning
+    # ReduceLROnPlateau: halbiert die LR wenn val_loss nicht besser wird
+    # → hilft dem Modell am Ende feiner zu optimieren
+    # ------------------------------------------------------------------
     def configure_optimizers(self):
-        """
-        Definiert den Optimizer und optional einen Learning Rate Scheduler.
-        (Lesson 3 - Hyperparameter Tuning)
-
-        Adam = adaptiver Optimizer, sehr gut für Deep Learning
-        ReduceLROnPlateau = halbiert LR wenn val_loss nicht mehr sinkt
-        """
-        optimizer = torch.optim.Adam(
-            self.parameters(),
-            lr=self.hparams.learning_rate,
-            weight_decay=1e-5   # L2 Regularisierung (Lesson 3 - Explicit Regularization)
-        )
-
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.learning_rate)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer,
-            mode="min",        # val_loss soll minimiert werden
-            factor=0.5,        # LR halbieren
-            patience=3,        # nach 3 Epochen ohne Verbesserung
+            mode="min",       # val_loss soll sinken
+            factor=0.5,       # LR × 0.5 wenn kein Fortschritt
+            patience=3        # warte 3 Epochen bevor LR gesenkt wird
         )
-
         return {
             "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": scheduler,
-                "monitor": "val_loss"  # beobachtet val_loss
-            }
+            "lr_scheduler": {"scheduler": scheduler, "monitor": "val_loss"}
         }
