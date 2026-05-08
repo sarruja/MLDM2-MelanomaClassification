@@ -58,13 +58,22 @@ def main():
         monitor="val_auc", mode="max", patience=5, verbose=True
     )
 
-    # Model Checkpoint: speichert nur das beste Modell (nach val_auc)
-    checkpoint = ModelCheckpoint(
+    # Bestes Modell (nach val_auc) → wird für finale Test-Evaluation verwendet
+    best_checkpoint = ModelCheckpoint(
         dirpath="checkpoints/",
         filename="best-{epoch:02d}-{val_auc:.4f}",
         monitor="val_auc",
         mode="max",
         save_top_k=1
+    )
+
+    # Letzter Checkpoint → wird nach jeder Epoche überschrieben
+    # Zweck: Training fortsetzen falls es abbricht (Resume)
+    # Resume: resume_from = "checkpoints/last.ckpt" setzen (siehe unten)
+    last_checkpoint = ModelCheckpoint(
+        dirpath="checkpoints/",
+        filename="last",
+        save_last=True      # überschreibt sich jede Epoche → immer aktuell
     )
 
     # LR Monitor: loggt die Lernrate → in TensorBoard sichtbar
@@ -74,20 +83,26 @@ def main():
     # TensorBoard anschauen mit: tensorboard --logdir tb_logs/
     logger = TensorBoardLogger("tb_logs", name="melanoma")
 
+    # ---- Resume from Checkpoint ----
+    # Falls Training abgebrochen: "checkpoints/last.ckpt" einkommentieren
+    # Falls erstes Training:      None lassen
+    resume_from = None
+    # resume_from = "checkpoints/last.ckpt"  # ← einkommentieren zum Fortsetzen
+
     # ---- Trainer ----
     trainer = L.Trainer(
-        max_epochs   = CONFIG["max_epochs"],
-        callbacks    = [early_stopping, checkpoint, lr_monitor],
-        logger       = logger,
-        accelerator  = "auto",   # GPU falls vorhanden, sonst CPU
-        devices      = "auto",
+        max_epochs        = CONFIG["max_epochs"],
+        callbacks         = [early_stopping, best_checkpoint, last_checkpoint, lr_monitor],
+        logger            = logger,
+        accelerator       = "auto",   # GPU falls vorhanden, sonst CPU
+        devices           = "auto",
         log_every_n_steps = 10,
-        fast_dev_run = CONFIG["fast_dev"],  # True = schneller lokaler Test
+        fast_dev_run      = CONFIG["fast_dev"],
     )
 
     # ---- Training ----
     print("\n🚀 Training startet...\n")
-    trainer.fit(model, datamodule=datamodule)
+    trainer.fit(model, datamodule=datamodule, ckpt_path=resume_from)
 
     # ---- Test-Evaluation ----
     # Nur beim echten Training (fast_dev hat kein Checkpoint gespeichert)
