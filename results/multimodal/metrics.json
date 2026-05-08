@@ -1,0 +1,18 @@
+{
+  "auc_roc": 0.8959901962169264,
+  "f1_score": 0.25984251968503935,
+  "avg_precision": 0.18791574989155663,
+  "threshold": 0.5,
+  "n_test_samples": 4969,
+  "n_positive": 87,
+  "n_negative": 4882,
+  "positive_rate_pct": 1.7508553266525269,
+  "true_negatives": 4748,
+  "false_positives": 134,
+  "false_negatives": 54,
+  "true_positives": 33,
+  "sensitivity": 0.3793103448275862,
+  "specificity": 0.9725522326915199,
+  "model_type": "multimodal",
+  "checkpoint": "checkpoints/best-epoch=15-val_auc=0.9087.ckpt"
+}

@@ -26,7 +26,7 @@ CONFIG = {
     "pos_weight"    : 50.0,    # ~98/2 Klassenungleichgewicht
     "dropout"       : 0.3,
     "max_epochs"    : 30,
-    "fast_dev"      : True,    # ← True = lokaler Test (1 Batch), False = echtes Training
+    "fast_dev"      : False,    # ← True = lokaler Test (1 Batch), False = echtes Training
 }
 
 
@@ -87,7 +87,7 @@ def main():
     # Falls Training abgebrochen: "checkpoints/last.ckpt" einkommentieren
     # Falls erstes Training:      None lassen
     resume_from = None
-    # resume_from = "checkpoints/last.ckpt"  # ← einkommentieren zum Fortsetzen
+    #resume_from = "checkpoints/last.ckpt"  # ← einkommentieren zum Fortsetzen
 
     # ---- Trainer ----
     trainer = L.Trainer(

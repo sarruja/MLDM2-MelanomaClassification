@@ -1,0 +1,18 @@
+{
+  "auc_roc": 0.9090089326496114,
+  "f1_score": 0.23736263736263735,
+  "avg_precision": 0.20834969498750813,
+  "threshold": 0.5,
+  "n_test_samples": 4969,
+  "n_positive": 87,
+  "n_negative": 4882,
+  "positive_rate_pct": 1.7508553266525269,
+  "true_negatives": 4568,
+  "false_positives": 314,
+  "false_negatives": 33,
+  "true_positives": 54,
+  "sensitivity": 0.6206896551724138,
+  "specificity": 0.9356820975010242,
+  "model_type": "baseline",
+  "checkpoint": "checkpoints/baseline/baseline-best-epoch=06-val_auc=0.8921.ckpt"
+}
