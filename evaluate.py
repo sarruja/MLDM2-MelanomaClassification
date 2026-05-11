@@ -49,7 +49,7 @@ from datamodule import MelanomaDataModule
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate Melanoma Model")
     parser.add_argument("--model", type=str, required=True,
-                        choices=["multimodal", "baseline"])
+                        choices=["multimodal", "baseline", "v2"])
     parser.add_argument("--checkpoint", type=str, required=True,
                         help="Pfad zum .ckpt File")
     parser.add_argument("--data_dir", type=str, default="data")
@@ -121,6 +121,9 @@ def get_predictions(model_type, checkpoint_path, data_dir, batch_size):
     if model_type == "multimodal":
         from model import MelanomaModel
         model = MelanomaModel.load_from_checkpoint(checkpoint_path)
+    elif model_type == "v2":
+        from model_v2 import MelanomaModelV2
+        model = MelanomaModelV2.load_from_checkpoint(checkpoint_path)
     else:
         from model_baseline import MelanomaModelBaseline
         model = MelanomaModelBaseline.load_from_checkpoint(checkpoint_path)
@@ -134,7 +137,7 @@ def get_predictions(model_type, checkpoint_path, data_dir, batch_size):
         labels_list = []
         with torch.no_grad():
             for batch in loader:
-                if model_type == "multimodal":
+                if model_type in ["multimodal", "v2"]:
                     images, metadata, labels = batch
                     images   = images.to(device)
                     metadata = metadata.to(device)
@@ -367,7 +370,7 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
 
     # ---- TensorBoard Export ----
-    tb_name    = "melanoma" if args.model == "multimodal" else "melanoma_baseline"
+    tb_name    = "melanoma" if args.model == "multimodal" else "melanoma_baseline" if args.model == "baseline" else "melanoma_v2"
     tb_log_dir = os.path.join("tb_logs", tb_name)
     history_df = export_training_history(
         tb_log_dir,

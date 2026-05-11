@@ -41,7 +41,7 @@ from datamodule import MelanomaDataModule, preprocess_metadata
 def parse_args():
     parser = argparse.ArgumentParser(description="Error Analysis")
     parser.add_argument("--model", type=str, required=True,
-                        choices=["multimodal", "baseline"])
+                        choices=["multimodal", "baseline", "v2"])
     parser.add_argument("--checkpoint", type=str, required=True)
     parser.add_argument("--data_dir", type=str, default="data")
     parser.add_argument("--batch_size", type=int, default=32)
@@ -91,6 +91,9 @@ def get_predictions_with_metadata(model_type, checkpoint_path, data_dir, batch_s
     if model_type == "multimodal":
         from model import MelanomaModel
         model = MelanomaModel.load_from_checkpoint(checkpoint_path)
+    elif model_type == "v2":
+        from model_v2 import MelanomaModelV2
+        model = MelanomaModelV2.load_from_checkpoint(checkpoint_path)
     else:
         from model_baseline import MelanomaModelBaseline
         model = MelanomaModelBaseline.load_from_checkpoint(checkpoint_path)
@@ -105,7 +108,7 @@ def get_predictions_with_metadata(model_type, checkpoint_path, data_dir, batch_s
 
     with torch.no_grad():
         for batch in datamodule.test_dataloader():
-            if model_type == "multimodal":
+            if model_type in ["multimodal", "v2"]:
                 images, metadata, labels = batch
                 images   = images.to(device)
                 metadata = metadata.to(device)
