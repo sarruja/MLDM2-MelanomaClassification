@@ -3,17 +3,19 @@
 #
 # Was dieses File macht:
 #   1. Lädt ein trainiertes Modell (Multimodal oder Baseline)
-#   2. Berechnet alle Metriken auf dem Test-Set
-#   3. Exportiert TensorBoard Logs → training_history.csv (alle Epochen)
-#   4. Speichert Metriken als JSON
-#   5. Erstellt und speichert Plots:
+#   2. Findet automatisch den optimalen Threshold auf dem Val-Set
+#      (maximiert F1-Score → besser als fixer 0.5 bei Klassenungleichgewicht)
+#   3. Berechnet alle Metriken auf dem Test-Set mit optimalem Threshold
+#   4. Exportiert TensorBoard Logs → training_history.csv (alle Epochen)
+#   5. Speichert Metriken als JSON
+#   6. Erstellt und speichert Plots:
 #      - Training History (loss/auc über alle Epochen)
-#      - ROC-Kurve
-#      - Confusion Matrix
+#      - ROC-Kurve mit optimalem Threshold markiert
+#      - Confusion Matrix (default 0.5 UND optimaler Threshold)
 #      - Precision-Recall Kurve
 #
 # Usage:
-#   python evaluate.py --model multimodal --checkpoint checkpoints/best-epoch=10-val_auc=0.8930.ckpt
+#   python evaluate.py --model multimodal --checkpoint checkpoints/best-epoch=15-val_auc=0.9087.ckpt
 #   python evaluate.py --model baseline   --checkpoint checkpoints/baseline/baseline-best-...ckpt
 #
 # Resultate in:
@@ -28,7 +30,7 @@ import pandas as pd
 import torch
 import matplotlib.pyplot as plt
 import matplotlib
-matplotlib.use("Agg")  # kein Display nötig (Server-Umgebung)
+matplotlib.use("Agg")
 
 from sklearn.metrics import (
     roc_curve, auc,
@@ -36,7 +38,6 @@ from sklearn.metrics import (
     precision_recall_curve, average_precision_score,
     f1_score, roc_auc_score
 )
-from torch.utils.tensorboard.writer import SummaryWriter
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
 from datamodule import MelanomaDataModule
@@ -58,36 +59,27 @@ def parse_args():
 
 # =============================================================================
 # TENSORBOARD EXPORT → CSV
-# Liest alle Epochen-Metriken aus den TensorBoard Logs
 # =============================================================================
 def export_training_history(tb_log_dir, output_path):
-    """
-    Liest TensorBoard Logs und exportiert als CSV.
-    tb_log_dir: z.B. "tb_logs/melanoma/version_0"
-    """
-    # Neueste version_X finden
     if not os.path.exists(tb_log_dir):
         print(f"TensorBoard Logs nicht gefunden: {tb_log_dir}")
         return None
 
-    # Alle version_* Ordner finden, neueste nehmen
     versions = [d for d in os.listdir(tb_log_dir) if d.startswith("version_")]
     if not versions:
         print("Keine TensorBoard Versionen gefunden.")
         return None
 
-    latest = sorted(versions)[-1]
+    latest   = sorted(versions)[-1]
     log_path = os.path.join(tb_log_dir, latest)
     print(f"Lese TensorBoard Logs: {log_path}")
 
-    # EventAccumulator laden
     ea = EventAccumulator(log_path)
     ea.Reload()
 
     available_tags = ea.Tags().get("scalars", [])
     print(f"Verfügbare Metriken: {available_tags}")
 
-    # Alle Metriken in DataFrame laden
     data = {}
     for tag in available_tags:
         events = ea.Scalars(tag)
@@ -99,8 +91,7 @@ def export_training_history(tb_log_dir, output_path):
         print("Keine Metriken in TensorBoard gefunden.")
         return None
 
-    # Duplikate entfernen (z.B. test_auc wird nur einmal geloggt)
-    # Nur Metriken die pro Epoche geloggt werden behalten
+    # Nur Epochen-Metriken behalten (test_auc etc. werden nur einmal geloggt)
     epoch_metrics = ["train_loss", "val_loss", "val_auc", "val_f1"]
     data = {k: v for k, v in data.items() if k in epoch_metrics}
 
@@ -117,6 +108,7 @@ def export_training_history(tb_log_dir, output_path):
 
 # =============================================================================
 # PREDICTIONS SAMMELN
+# Gibt Predictions für Val-Set UND Test-Set zurück
 # =============================================================================
 def get_predictions(model_type, checkpoint_path, data_dir, batch_size):
     datamodule = MelanomaDataModule(
@@ -135,35 +127,107 @@ def get_predictions(model_type, checkpoint_path, data_dir, batch_size):
 
     model.eval()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = model.to(device)
+    model  = model.to(device)
 
-    all_probs  = []
-    all_labels = []
+    def collect(loader):
+        probs_list  = []
+        labels_list = []
+        with torch.no_grad():
+            for batch in loader:
+                if model_type == "multimodal":
+                    images, metadata, labels = batch
+                    images   = images.to(device)
+                    metadata = metadata.to(device)
+                    logits   = model(images, metadata)
+                else:
+                    images, metadata, labels = batch
+                    images = images.to(device)
+                    logits = model(images)
+                probs_list.extend(torch.sigmoid(logits).cpu().numpy())
+                labels_list.extend(labels.numpy())
+        return np.array(probs_list), np.array(labels_list)
+
+    print("Sammle Predictions auf Val-Set (für Threshold Tuning)...")
+    val_probs, val_labels = collect(datamodule.val_dataloader())
 
     print("Sammle Predictions auf Test-Set...")
-    with torch.no_grad():
-        for batch in datamodule.test_dataloader():
-            if model_type == "multimodal":
-                images, metadata, labels = batch
-                images   = images.to(device)
-                metadata = metadata.to(device)
-                logits   = model(images, metadata)
-            else:
-                images, metadata, labels = batch  # metadata wird ignoriert
-                images = images.to(device)
-                logits = model(images)
+    test_probs, test_labels = collect(datamodule.test_dataloader())
 
-            probs = torch.sigmoid(logits).cpu().numpy()
-            all_probs.extend(probs)
-            all_labels.extend(labels.numpy())
+    return val_probs, val_labels, test_probs, test_labels
 
-    return np.array(all_probs), np.array(all_labels)
+
+# =============================================================================
+# THRESHOLD TUNING
+#
+# Warum nicht einfach 0.5?
+# Bei ~2% positiven Fällen ist das Modell "vorsichtig" — es braucht eine höhere
+# Wahrscheinlichkeit bevor es Melanom sagt. Threshold 0.5 führt deshalb zu vielen
+# False Negatives (verpasste Melanome).
+#
+# Wir berechnen drei Thresholds auf dem VAL-Set:
+#   1. F1-optimal     → bester Kompromiss zwischen Precision und Recall
+#   2. Sensitivity    → minimiert verpasste Melanome (wichtiger im medizin. Kontext!)
+#
+# WICHTIG: Threshold IMMER auf Val-Set bestimmen, nie auf Test-Set!
+# Sonst würden wir den Test-Set "cheaten".
+#
+# Im medizinischen Kontext gilt:
+#   False Negative (verpasstes Melanom) >> False Positive (falscher Alarm)
+#   → Sensitivity-Threshold ist medizinisch relevanter als F1-Threshold
+# =============================================================================
+def find_optimal_thresholds(val_probs, val_labels, min_sensitivity=0.80):
+    """
+    Findet zwei optimale Thresholds auf dem Val-Set:
+    1. F1-optimal: maximiert F1-Score
+    2. Sensitivity-optimal: niedrigster Threshold der Sensitivity >= min_sensitivity erreicht
+    """
+    thresholds = np.arange(0.05, 0.95, 0.01)
+
+    # --- F1-optimal ---
+    best_f1_threshold = 0.5
+    best_f1 = 0.0
+    for t in thresholds:
+        preds = (val_probs >= t).astype(int)
+        f1 = f1_score(val_labels, preds, zero_division=0)
+        if f1 > best_f1:
+            best_f1 = f1
+            best_f1_threshold = t
+
+    # --- Sensitivity-optimal ---
+    # Höchsten Threshold finden der noch Sensitivity >= min_sensitivity erreicht
+    # (höherer Threshold = weniger aber sicherere Vorhersagen)
+    # Wir nehmen den niedrigsten Threshold der min_sensitivity erreicht
+    sensitivity_threshold = 0.5
+    for t in thresholds:
+        preds = (val_probs >= t).astype(int)
+        tp = int(((preds == 1) & (val_labels == 1)).sum())
+        fn = int(((preds == 0) & (val_labels == 1)).sum())
+        sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0
+        if sensitivity >= min_sensitivity:
+            sensitivity_threshold = t
+            break  # niedrigsten Threshold nehmen der Ziel erreicht
+
+    # Sensitivity bei diesem Threshold berechnen
+    preds_sens = (val_probs >= sensitivity_threshold).astype(int)
+    tp = int(((preds_sens == 1) & (val_labels == 1)).sum())
+    fn = int(((preds_sens == 0) & (val_labels == 1)).sum())
+    actual_sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0
+
+    print(f"\n📊 Threshold Tuning (auf Val-Set):")
+    print(f"   Default Threshold          : 0.50")
+    print(f"   F1-optimal Threshold       : {best_f1_threshold:.2f}  (Val F1: {best_f1:.4f})")
+    print(f"   Sensitivity Threshold      : {sensitivity_threshold:.2f}  (Val Sensitivity: {actual_sensitivity:.4f})")
+    print(f"   Ziel-Sensitivity           : >= {min_sensitivity}")
+    print(f"\n   → Medizinisch empfohlen: Sensitivity-Threshold ({sensitivity_threshold:.2f})")
+    print(f"     Verpasste Melanome werden minimiert auf Kosten von mehr False Positives")
+
+    return float(best_f1_threshold), float(best_f1), float(sensitivity_threshold), float(actual_sensitivity)
 
 
 # =============================================================================
 # METRIKEN BERECHNEN
 # =============================================================================
-def compute_metrics(probs, labels, threshold=0.5):
+def compute_metrics(probs, labels, threshold):
     preds = (probs >= threshold).astype(int)
     cm    = confusion_matrix(labels, preds)
     tn, fp, fn, tp = cm.ravel()
@@ -172,7 +236,7 @@ def compute_metrics(probs, labels, threshold=0.5):
         "auc_roc"          : float(roc_auc_score(labels, probs)),
         "f1_score"         : float(f1_score(labels, preds, zero_division=0)),
         "avg_precision"    : float(average_precision_score(labels, probs)),
-        "threshold"        : threshold,
+        "threshold"        : float(threshold),
         "n_test_samples"   : int(len(labels)),
         "n_positive"       : int(labels.sum()),
         "n_negative"       : int((1 - labels).sum()),
@@ -193,7 +257,6 @@ def compute_metrics(probs, labels, threshold=0.5):
 def plot_training_history(df, save_path):
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
-    # Loss
     if "train_loss" in df.columns:
         axes[0].plot(df.index, df["train_loss"], label="Train Loss", color="#7F77DD")
     if "val_loss" in df.columns:
@@ -204,7 +267,6 @@ def plot_training_history(df, save_path):
     axes[0].legend()
     axes[0].grid(alpha=0.3)
 
-    # AUC
     if "val_auc" in df.columns:
         axes[1].plot(df.index, df["val_auc"], label="Val AUC-ROC", color="#1D9E75")
     if "val_f1" in df.columns:
@@ -222,15 +284,21 @@ def plot_training_history(df, save_path):
     print(f"Training History Plot gespeichert: {save_path}")
 
 
-def plot_roc_curve(probs, labels, save_path):
-    fpr, tpr, _ = roc_curve(labels, probs)
+def plot_roc_curve(probs, labels, threshold, save_path):
+    fpr, tpr, thresholds_roc = roc_curve(labels, probs)
     roc_auc = auc(fpr, tpr)
+
+    # Punkt auf der ROC-Kurve der dem optimalen Threshold entspricht
+    idx = np.argmin(np.abs(thresholds_roc - threshold))
 
     plt.figure(figsize=(8, 6))
     plt.plot(fpr, tpr, color="#7F77DD", lw=2,
              label=f"ROC Curve (AUC = {roc_auc:.4f})")
     plt.plot([0, 1], [0, 1], color="gray", linestyle="--", lw=1,
              label="Random (AUC = 0.5)")
+    # Optimaler Threshold als Punkt markieren
+    plt.scatter(fpr[idx], tpr[idx], color="#E8735A", s=100, zorder=5,
+                label=f"Optimal threshold = {threshold:.2f}")
     plt.xlabel("False Positive Rate", fontsize=12)
     plt.ylabel("True Positive Rate", fontsize=12)
     plt.title("ROC Curve – Melanoma Classification", fontsize=14)
@@ -242,27 +310,40 @@ def plot_roc_curve(probs, labels, save_path):
     print(f"ROC Curve gespeichert: {save_path}")
 
 
-def plot_confusion_matrix(cm, save_path):
-    fig, ax = plt.subplots(figsize=(6, 5))
-    disp = ConfusionMatrixDisplay(
-        confusion_matrix=cm,
-        display_labels=["Benign", "Melanoma"]
-    )
-    disp.plot(ax=ax, colorbar=False, cmap="Blues")
-    ax.set_title("Confusion Matrix – Melanoma Classification", fontsize=13)
+def plot_confusion_matrix_comparison(probs, labels, threshold_default, threshold_optimal, save_path):
+    """Zeigt zwei Confusion Matrices nebeneinander: default 0.5 vs. optimaler Threshold."""
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+    for ax, t, title in zip(
+        axes,
+        [threshold_default, threshold_optimal],
+        [f"Default threshold = {threshold_default}", f"Optimal threshold = {threshold_optimal:.2f}"]
+    ):
+        preds = (probs >= t).astype(int)
+        cm    = confusion_matrix(labels, preds)
+        disp  = ConfusionMatrixDisplay(cm, display_labels=["Benign", "Melanoma"])
+        disp.plot(ax=ax, colorbar=False, cmap="Blues")
+        ax.set_title(title, fontsize=12)
+
+    plt.suptitle("Confusion Matrix – Melanoma Classification", fontsize=14)
     plt.tight_layout()
     plt.savefig(save_path, dpi=150)
     plt.close()
     print(f"Confusion Matrix gespeichert: {save_path}")
 
 
-def plot_precision_recall(probs, labels, save_path):
-    precision, recall, _ = precision_recall_curve(labels, probs)
+def plot_precision_recall(probs, labels, threshold, save_path):
+    precision, recall, thresholds_pr = precision_recall_curve(labels, probs)
     avg_precision = average_precision_score(labels, probs)
+
+    # Punkt für optimalen Threshold
+    idx = np.argmin(np.abs(thresholds_pr - threshold))
 
     plt.figure(figsize=(8, 6))
     plt.plot(recall, precision, color="#1D9E75", lw=2,
              label=f"PR Curve (AP = {avg_precision:.4f})")
+    plt.scatter(recall[idx], precision[idx], color="#E8735A", s=100, zorder=5,
+                label=f"Optimal threshold = {threshold:.2f}")
     plt.axhline(y=labels.mean(), color="gray", linestyle="--", lw=1,
                 label=f"Random (AP = {labels.mean():.4f})")
     plt.xlabel("Recall", fontsize=12)
@@ -292,48 +373,73 @@ def main():
         tb_log_dir,
         os.path.join(output_dir, "training_history.csv")
     )
-
-    # ---- Training History Plot ----
     if history_df is not None:
-        plot_training_history(
-            history_df,
-            os.path.join(output_dir, "training_history.png")
-        )
+        plot_training_history(history_df,
+                              os.path.join(output_dir, "training_history.png"))
 
-    # ---- Predictions auf Test-Set ----
-    probs, labels = get_predictions(
+    # ---- Predictions ----
+    val_probs, val_labels, test_probs, test_labels = get_predictions(
         args.model, args.checkpoint, args.data_dir, args.batch_size
     )
 
-    # ---- Metriken ----
-    metrics, cm = compute_metrics(probs, labels)
-    metrics["model_type"] = args.model
-    metrics["checkpoint"] = args.checkpoint
+    # ---- Threshold Tuning auf Val-Set ----
+    f1_threshold, val_f1, sens_threshold, val_sensitivity = find_optimal_thresholds(
+        val_probs, val_labels, min_sensitivity=0.80
+    )
 
-    # Ausgabe
-    print("\n" + "="*50)
+    # ---- Metriken mit allen drei Thresholds ----
+    metrics_default, _  = compute_metrics(test_probs, test_labels, threshold=0.5)
+    metrics_f1, _       = compute_metrics(test_probs, test_labels, threshold=f1_threshold)
+    metrics_sens, cm_sens = compute_metrics(test_probs, test_labels, threshold=sens_threshold)
+
+    # Ausgabe Vergleich
+    print("\n" + "="*70)
     print(f"  RESULTATE – {args.model.upper()} MODEL")
-    print("="*50)
-    print(f"  AUC-ROC        : {metrics['auc_roc']:.4f}")
-    print(f"  F1-Score       : {metrics['f1_score']:.4f}")
-    print(f"  Avg Precision  : {metrics['avg_precision']:.4f}")
-    print(f"  Sensitivity    : {metrics['sensitivity']:.4f}")
-    print(f"  Specificity    : {metrics['specificity']:.4f}")
-    print(f"  TP: {metrics['true_positives']}  FP: {metrics['false_positives']}  "
-          f"TN: {metrics['true_negatives']}  FN: {metrics['false_negatives']}")
-    print("="*50 + "\n")
+    print("="*70)
+    print(f"  {'Metrik':<20} {'Default (0.5)':>15} {'F1-optimal':>15} {'Sensitivity':>15}")
+    print(f"  {'-'*65}")
+    for key, label in [
+        ("auc_roc",     "AUC-ROC"),
+        ("f1_score",    "F1-Score"),
+        ("sensitivity", "Sensitivity"),
+        ("specificity", "Specificity"),
+        ("threshold",   "Threshold"),
+        ("true_positives",  "TP"),
+        ("false_negatives", "FN"),
+        ("false_positives", "FP"),
+    ]:
+        fmt = ".4f" if key not in ["true_positives", "false_negatives", "false_positives", "threshold"] else ".2f" if key == "threshold" else "d"
+        d = metrics_default[key]
+        f = metrics_f1[key]
+        s = metrics_sens[key]
+        if fmt == "d":
+            print(f"  {label:<20} {d:>15} {f:>15} {s:>15}")
+        else:
+            print(f"  {label:<20} {d:>15{fmt}} {f:>15{fmt}} {s:>15{fmt}}")
+    print("="*70 + "\n")
+    print("  → Medizinisch empfohlen: Sensitivity-Threshold")
+    print(f"    Minimiert verpasste Melanome (FN: {metrics_sens['false_negatives']} vs {metrics_default['false_negatives']} bei default)\n")
 
-    # JSON speichern
+    # JSON speichern (alle drei Thresholds)
+    results = {
+        "model_type" : args.model,
+        "checkpoint" : args.checkpoint,
+        "default_threshold"     : metrics_default,
+        "f1_optimal_threshold"  : metrics_f1,
+        "sensitivity_threshold" : metrics_sens,
+        "val_f1_at_f1_threshold"         : val_f1,
+        "val_sensitivity_at_sens_threshold": val_sensitivity,
+    }
     with open(os.path.join(output_dir, "metrics.json"), "w") as f:
-        json.dump(metrics, f, indent=2)
+        json.dump(results, f, indent=2)
     print(f"Metriken gespeichert: {output_dir}/metrics.json")
 
-    # ---- Plots ----
-    plot_roc_curve(probs, labels,
+    # ---- Plots (mit Sensitivity-Threshold als Hauptthreshold) ----
+    plot_roc_curve(test_probs, test_labels, sens_threshold,
                    os.path.join(output_dir, "roc_curve.png"))
-    plot_confusion_matrix(cm,
-                          os.path.join(output_dir, "confusion_matrix.png"))
-    plot_precision_recall(probs, labels,
+    plot_confusion_matrix_comparison(test_probs, test_labels, 0.5, sens_threshold,
+                                     os.path.join(output_dir, "confusion_matrix.png"))
+    plot_precision_recall(test_probs, test_labels, sens_threshold,
                           os.path.join(output_dir, "precision_recall_curve.png"))
 
     print(f"\n✅ Alle Resultate gespeichert in: results/{args.model}/")
