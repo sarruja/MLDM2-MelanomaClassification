@@ -19,17 +19,46 @@ Deep learning model to predict the probability that a skin lesion is malignant (
 
 ## 📊 Results
 
+### Multimodal vs. Baseline (Threshold = 0.50)
+
 | Metric | Multimodal | Baseline (images only) |
 |---|---|---|
-| **AUC-ROC** | 0.896 | 0.909 |
-| **F1-Score** | 0.260 | 0.237 |
-| **Sensitivity** | 0.379 | 0.621 |
-| **Specificity** | 0.973 | 0.936 |
-| Best epoch | 15 | 6 |
+| **AUC-ROC** | 0.9126 | 0.9090 |
+| **F1-Score** | 0.2326 | 0.2374 |
+| **Sensitivity** | 0.6322 | 0.6207 |
+| **Specificity** | 0.9322 | 0.9357 |
+| **TP** | 55 | 54 |
+| **FN** | 32 | 33 |
+| **FP** | 331 | 314 |
+| Best epoch | 6 | 6 |
 
-> AUC-ROC is the primary metric — accuracy is meaningless with ~2% positive cases. F1-scores in the 0.23–0.26 range are expected and consistent with other solutions on this dataset.
+> AUC-ROC is the primary metric — accuracy is meaningless with ~2% positive cases.
+> Multimodal model achieves higher AUC and Sensitivity; Baseline has slightly better Specificity and F1.
+> The metadata changed the decision behaviour slightly, but image features still dominate.
 
-Full results (plots, metrics JSON, training history) are saved in `results/`.
+### Threshold Analysis – Multimodal Model
+
+| Threshold | Sensitivity | Specificity | F1-Score | TP | FN | FP |
+|---|---|---|---|---|---|---|
+| 0.05 | 0.782 | 0.894 | 0.202 | 68 | 19 | 517 |
+| 0.10 | 0.736 | 0.907 | 0.212 | 64 | 23 | 452 |
+| 0.20 | 0.736 | 0.917 | 0.229 | 64 | 23 | 407 |
+| 0.30 | 0.701 | 0.922 | 0.230 | 61 | 26 | 382 |
+| 0.50 | 0.632 | 0.932 | 0.233 | 55 | 32 | 331 |
+
+> In a medical context, a lower threshold (e.g. 0.05–0.10) is preferable: missed melanomas (FN) are far more critical than false alarms (FP). At threshold 0.05, Sensitivity reaches 0.78 at the cost of more False Positives.
+
+### pos_weight Hyperparameter Search
+
+| pos_weight | AUC-ROC | Sensitivity | Specificity | TP | FN |
+|---|---|---|---|---|---|
+| 25 | 0.9124 | 0.402 | 0.977 | 35 | 52 |
+| **50** | **0.9126** | **0.632** | **0.932** | **55** | **32** |
+| 75 | 0.9182 | 0.598 | 0.939 | 52 | 35 |
+
+> pos_weight=50 chosen as best trade-off between Sensitivity and AUC.
+
+Full results (plots, metrics JSON, training history, error analysis) are saved in `results/`.
 
 ---
 
@@ -88,24 +117,33 @@ Evaluation uses AUC-ROC and F1-score instead of accuracy.
 
 ```
 MLDM2-MelanomaClassification/
-├── data/                   # NOT in repo – download manually (see below)
-│   ├── train/              # 33126 training images (.png, 224x224)
-│   ├── test/               # 10982 test images (.png, 224x224)
-│   ├── train.csv           # Labels & metadata (target, age, sex, body site)
-│   └── test.csv            # Test metadata (no labels)
-├── checkpoints/            # Saved model weights (auto-created, not in repo)
-├── tb_logs/                # TensorBoard logs (auto-created, not in repo)
-├── results/                # Evaluation outputs (in repo)
-│   ├── multimodal/         # metrics.json, roc_curve.png, confusion_matrix.png, ...
-│   └── baseline/           # metrics.json, roc_curve.png, confusion_matrix.png, ...
-├── datamodule.py           # Data loading, preprocessing, augmentation, splits
-├── model.py                # Multimodal EfficientNet-B0 model architecture
-├── model_baseline.py       # Baseline model (images only, no metadata)
-├── train.py                # Multimodal training script
-├── train_baseline.py       # Baseline training script
-├── evaluate.py             # Evaluation & plots for both models
-├── eda.ipynb               # Exploratory data analysis notebook
-├── requirements.txt        # Python dependencies
+├── data/                        # NOT in repo – download manually (see below)
+│   ├── train/                   # 33126 training images (.png, 224x224)
+│   ├── test/                    # 10982 test images (.png, 224x224)
+│   ├── train.csv                # Labels & metadata (target, age, sex, body site)
+│   └── test.csv                 # Test metadata (no labels)
+├── checkpoints/                 # Saved model weights (auto-created, not in repo)
+├── tb_logs/                     # TensorBoard logs (auto-created, not in repo)
+├── results/                     # Evaluation outputs (in repo)
+│   ├── multimodal/              # metrics.json, roc_curve.png, confusion_matrix.png,
+│   │                            # training_history.png, error_analysis.png,
+│   │                            # threshold_comparison.csv
+│   ├── baseline/                # same as multimodal/
+│   ├── hparam_pos_weight_25/    # metrics.json
+│   ├── hparam_pos_weight_50/    # metrics.json
+│   ├── hparam_pos_weight_75/    # metrics.json
+│   └── hparam_comparison.csv   # pos_weight experiment comparison
+├── datamodule.py                # Data loading, preprocessing, augmentation, splits
+├── model.py                     # Multimodal EfficientNet-B0 model architecture
+├── model_baseline.py            # Baseline model (images only, no metadata)
+├── model_v2.py                  # V2 model (improved fusion architecture)
+├── train.py                     # Multimodal training script
+├── train_baseline.py            # Baseline training script
+├── train_v2.py                  # V2 training script
+├── hyperparameter_search.py     # pos_weight hyperparameter experiments
+├── evaluate.py                  # Evaluation, threshold analysis & plots
+├── eda.ipynb                    # Exploratory data analysis notebook
+├── requirements.txt             # Python dependencies
 ├── .gitignore
 └── README.md
 ```
@@ -208,20 +246,31 @@ py train.py
 
 **Full training on LightningAI:**
 ```bash
-# In train.py: set "fast_dev": False, resume_from = None
+# Multimodal model
 python train.py
 
-# Baseline model:
+# Baseline model
 python train_baseline.py
+
+# Hyperparameter search (pos_weight)
+python hyperparameter_search.py
 ```
 
 **Evaluate & save results:**
 ```bash
-python evaluate.py --model multimodal --checkpoint checkpoints/best-epoch=XX-val_auc=X.ckpt
-python evaluate.py --model baseline   --checkpoint checkpoints/baseline/baseline-best-epoch=XX-val_auc=X.ckpt
+# Multimodal
+python evaluate.py --model multimodal --checkpoint checkpoints/hparam_pos_weight_50/pos50-best-epoch=06-val_auc=0.9044.ckpt
+
+# Baseline
+python evaluate.py --model baseline --checkpoint checkpoints/baseline/baseline-best-epoch=06-val_auc=0.8921.ckpt
 ```
 
-Results are saved to `results/multimodal/` and `results/baseline/`.
+Results are saved to `results/multimodal/` and `results/baseline/`, including:
+- `metrics.json` – all metrics for all thresholds
+- `threshold_comparison.csv` – threshold analysis table
+- `error_analysis.png` – FP / FN image grid
+- `roc_curve.png`, `confusion_matrix.png`, `precision_recall_curve.png`
+- `training_history.png` / `training_history.csv`
 
 **Resume training after interruption:**
 ```bash
@@ -252,12 +301,13 @@ python train.py
 - [x] Full training run on LightningAI (GPU)
 - [x] Compare baseline vs. multimodal model
 - [x] Log experiments (TensorBoard)
-- [ ] Tune hyperparameters (LR, batch size, pos_weight, dropout)
+- [x] Hyperparameter search (pos_weight: 25 / 50 / 75)
 
 ### 📊 Evaluation
 - [x] AUC-ROC, F1-score, confusion matrix on test set
 - [x] Training history (loss/auc per epoch)
-- [ ] Error analysis (which images are misclassified?)
+- [x] Threshold analysis (0.05 / 0.10 / 0.20 / 0.30 / 0.50)
+- [x] Error analysis (FP / FN image grid)
 - [ ] (Optional) Late submission on Kaggle leaderboard
 
 ### 📝 Report & presentation
@@ -273,4 +323,3 @@ python train.py
 - [Pre-processed 224x224 Images](https://www.kaggle.com/datasets/arroqc/siic-isic-224x224-images)
 - [PyTorch Lightning Docs](https://lightning.ai/docs/pytorch/stable/)
 - [timm – Pretrained Models](https://huggingface.co/docs/timm/index)
-
