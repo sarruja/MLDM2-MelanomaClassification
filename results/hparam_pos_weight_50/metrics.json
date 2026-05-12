@@ -1,6 +1,6 @@
 {
-  "model_type": "multimodal",
-  "checkpoint": "checkpoints/hparam_pos_weight_50/pos50-best-epoch=06-val_auc=0.9044.ckpt",
+  "pos_weight": 50,
+  "checkpoint": "/teamspace/studios/this_studio/MLDM2-MelanomaClassification/checkpoints/hparam_pos_weight_50/pos50-best-epoch=06-val_auc=0.9044.ckpt",
   "default_threshold": {
     "auc_roc": 0.9126359085922011,
     "f1_score": 0.23255813953488372,
@@ -16,22 +16,6 @@
     "true_positives": 55,
     "sensitivity": 0.632183908045977,
     "specificity": 0.9321999180663663
-  },
-  "f1_optimal_threshold": {
-    "auc_roc": 0.9126359085922011,
-    "f1_score": 0.2582781456953642,
-    "avg_precision": 0.22921665440447275,
-    "threshold": 0.9400000000000002,
-    "n_test_samples": 4969,
-    "n_positive": 87,
-    "n_negative": 4882,
-    "positive_rate_pct": 1.7508553266525269,
-    "true_negatives": 4706,
-    "false_positives": 176,
-    "false_negatives": 48,
-    "true_positives": 39,
-    "sensitivity": 0.4482758620689655,
-    "specificity": 0.9639492011470708
   },
   "sensitivity_threshold": {
     "auc_roc": 0.9126359085922011,
@@ -49,6 +33,5 @@
     "sensitivity": 0.632183908045977,
     "specificity": 0.9321999180663663
   },
-  "val_f1_at_f1_threshold": 0.3024054982817869,
-  "val_sensitivity_at_sens_threshold": 0.5681818181818182
+  "sens_threshold_value": 0.5
 }

@@ -23,7 +23,7 @@ CONFIG = {
     "dropout"       : 0.3,
     "proj_dim"      : 128,    # Projektionsdimension für Bild + Metadaten
     "max_epochs"    : 30,
-    "fast_dev"      : True,   # ← True = lokaler Test, False = echtes Training
+    "fast_dev"      : False,   # ← True = lokaler Test, False = echtes Training
 }
 
 

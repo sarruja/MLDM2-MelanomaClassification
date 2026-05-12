@@ -30,6 +30,7 @@ import pandas as pd
 import torch
 import matplotlib.pyplot as plt
 import matplotlib
+from PIL import Image
 matplotlib.use("Agg")
 
 from sklearn.metrics import (
@@ -360,6 +361,127 @@ def plot_precision_recall(probs, labels, threshold, save_path):
     print(f"Precision-Recall Curve gespeichert: {save_path}")
 
 
+def threshold_comparison_table(test_probs, test_labels, save_path=None):
+    thresholds = [0.05, 0.10, 0.20, 0.30, 0.50]
+    rows = []
+    for t in thresholds:
+        m, _ = compute_metrics(test_probs, test_labels, threshold=t)
+        rows.append({
+            "Threshold"  : t,
+            "Sensitivity": round(m["sensitivity"], 3),
+            "Specificity": round(m["specificity"], 3),
+            "F1-Score"   : round(m["f1_score"], 3),
+            "TP": m["true_positives"],
+            "FN": m["false_negatives"],
+            "FP": m["false_positives"],
+        })
+    df = pd.DataFrame(rows)
+    print(df.to_string(index=False))
+    if save_path:
+        df.to_csv(save_path, index=False)
+    return df
+
+
+def plot_error_analysis(model_type, checkpoint_path, data_dir, batch_size, threshold, save_path):
+    """
+    Zeigt je 4 False Positives und 4 False Negatives als Bildgrid.
+    FP = Benign aber als Melanom klassifiziert
+    FN = Melanom aber verpasst → medizinisch kritisch!
+    """
+    from datamodule import MelanomaDataset, MelanomaDataModule, preprocess_metadata
+    from sklearn.model_selection import train_test_split
+    import pandas as pd
+
+    # Dataset neu aufbauen (ohne Augmentation, mit image_name)
+    df = pd.read_csv(os.path.join(data_dir, "train.csv"))
+    train_df, temp_df = train_test_split(df, test_size=0.30, stratify=df["target"], random_state=42)
+    val_df, test_df   = train_test_split(temp_df, test_size=0.50, stratify=temp_df["target"], random_state=42)
+
+    train_df, _, age_min, age_max = preprocess_metadata(train_df)
+    test_df,  _, _,       _       = preprocess_metadata(test_df, age_min, age_max)
+
+    # Predictions sammeln + Index merken
+    if model_type == "multimodal":
+        from model import MelanomaModel
+        model = MelanomaModel.load_from_checkpoint(checkpoint_path)
+    elif model_type == "v2":
+        from model_v2 import MelanomaModelV2
+        model = MelanomaModelV2.load_from_checkpoint(checkpoint_path)
+    else:
+        from model_baseline import MelanomaModelBaseline
+        model = MelanomaModelBaseline.load_from_checkpoint(checkpoint_path)
+
+    model.eval()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model  = model.to(device)
+
+    from torchvision import transforms
+    eval_transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+    from datamodule import MelanomaDataset
+    test_dataset = MelanomaDataset(test_df, os.path.join(data_dir, "train"), transform=eval_transform)
+    loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
+
+    all_probs, all_labels = [], []
+    with torch.no_grad():
+        for batch in loader:
+            images, metadata, labels = batch
+            images = images.to(device)
+            if model_type in ["multimodal", "v2"]:
+                metadata = metadata.to(device)
+                logits = model(images, metadata)
+            else:
+                logits = model(images)
+            all_probs.extend(torch.sigmoid(logits).cpu().numpy())
+            all_labels.extend(labels.numpy())
+
+    probs  = np.array(all_probs)
+    labels = np.array(all_labels)
+    preds  = (probs >= threshold).astype(int)
+
+    # FP / FN Indizes
+    fp_idx = np.where((preds == 1) & (labels == 0))[0]
+    fn_idx = np.where((preds == 0) & (labels == 1))[0]
+
+    # Nach Konfidenz sortieren (interessanteste Fälle zuerst)
+    fp_idx = fp_idx[np.argsort(probs[fp_idx])[::-1]][:4]  # höchste FP-Konfidenz
+    fn_idx = fn_idx[np.argsort(probs[fn_idx])[::-1]][:4]  # höchste FN-Konfidenz (knapp verpasst)
+
+    fig, axes = plt.subplots(2, 4, figsize=(16, 8))
+    fig.suptitle(f"Error Analysis (Threshold = {threshold:.2f})", fontsize=14)
+
+    for col, idx in enumerate(fp_idx):
+        row_data = test_df.iloc[idx]
+        img_path = os.path.join(data_dir, "train", row_data["image_name"] + ".jpg")
+        if not os.path.exists(img_path):
+            img_path = os.path.join(data_dir, "train", row_data["image_name"] + ".png")
+        img = Image.open(img_path).convert("RGB").resize((224, 224))
+        axes[0, col].imshow(img)
+        axes[0, col].set_title(f"FP | p={probs[idx]:.2f}", color="orange")
+        axes[0, col].axis("off")
+
+    for col, idx in enumerate(fn_idx):
+        row_data = test_df.iloc[idx]
+        img_path = os.path.join(data_dir, "train", row_data["image_name"] + ".jpg")
+        if not os.path.exists(img_path):
+            img_path = os.path.join(data_dir, "train", row_data["image_name"] + ".png")
+        img = Image.open(img_path).convert("RGB").resize((224, 224))
+        axes[1, col].imshow(img)
+        axes[1, col].set_title(f"FN | p={probs[idx]:.2f}", color="red")
+        axes[1, col].axis("off")
+
+    axes[0, 0].set_ylabel("False Positives\n(Benign → Melanom)", fontsize=11, color="orange")
+    axes[1, 0].set_ylabel("False Negatives\n(Melanom verpasst!)", fontsize=11, color="red")
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150)
+    plt.close()
+    print(f"Error Analysis gespeichert: {save_path}")
+
+
 # =============================================================================
 # MAIN
 # =============================================================================
@@ -445,7 +567,17 @@ def main():
     plot_precision_recall(test_probs, test_labels, sens_threshold,
                           os.path.join(output_dir, "precision_recall_curve.png"))
 
+    plot_error_analysis(
+    args.model, args.checkpoint, args.data_dir, args.batch_size,
+    threshold=sens_threshold,
+    save_path=os.path.join(output_dir, "error_analysis.png"))
+    
+    threshold_comparison_table(
+    test_probs, test_labels,
+    save_path=os.path.join(output_dir, "threshold_comparison.csv"))
+
     print(f"\n✅ Alle Resultate gespeichert in: results/{args.model}/")
+
 
 
 if __name__ == "__main__":

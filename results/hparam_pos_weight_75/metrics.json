@@ -1,0 +1,37 @@
+{
+  "pos_weight": 75,
+  "checkpoint": "/teamspace/studios/this_studio/MLDM2-MelanomaClassification/checkpoints/hparam_pos_weight_75/pos75-best-epoch=07-val_auc=0.9010.ckpt",
+  "default_threshold": {
+    "auc_roc": 0.9182382385210508,
+    "f1_score": 0.23853211009174313,
+    "avg_precision": 0.23585983515497091,
+    "threshold": 0.5,
+    "n_test_samples": 4969,
+    "n_positive": 87,
+    "n_negative": 4882,
+    "positive_rate_pct": 1.7508553266525269,
+    "true_negatives": 4585,
+    "false_positives": 297,
+    "false_negatives": 35,
+    "true_positives": 52,
+    "sensitivity": 0.5977011494252874,
+    "specificity": 0.939164276935682
+  },
+  "sensitivity_threshold": {
+    "auc_roc": 0.9182382385210508,
+    "f1_score": 0.23853211009174313,
+    "avg_precision": 0.23585983515497091,
+    "threshold": 0.5,
+    "n_test_samples": 4969,
+    "n_positive": 87,
+    "n_negative": 4882,
+    "positive_rate_pct": 1.7508553266525269,
+    "true_negatives": 4585,
+    "false_positives": 297,
+    "false_negatives": 35,
+    "true_positives": 52,
+    "sensitivity": 0.5977011494252874,
+    "specificity": 0.939164276935682
+  },
+  "sens_threshold_value": 0.5
+}
