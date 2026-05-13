@@ -324,6 +324,65 @@ def save_example_images(df, error_type, data_dir, output_dir, n=8):
     plt.close()
     print(f"Beispielbilder {error_type} gespeichert: {save_path}")
 
+def save_combined_examples(df, data_dir, output_dir, n=4):
+    """FN links, FP rechts – nebeneinander in einer Grafik."""
+    fn_subset = df[df["error_type"] == "FN"].nsmallest(n, "prob")
+    fp_subset  = df[df["error_type"] == "FP"].nlargest(n, "prob")
+
+    fig, axes = plt.subplots(2, n * 2, figsize=(3 * n * 2, 7))
+    image_dir = os.path.join(data_dir, "train")
+
+    for col, (_, row) in enumerate(fn_subset.iterrows()):
+        for row_idx in range(2):
+            ax = axes[row_idx, col]
+            if row_idx == 0:
+                img_path = os.path.join(image_dir, row["image_name"] + ".png")
+                if not os.path.exists(img_path):
+                    img_path = os.path.join(image_dir, row["image_name"] + ".jpg")
+                try:
+                    img = Image.open(img_path).convert("RGB")
+                    ax.imshow(img)
+                except:
+                    ax.text(0.5, 0.5, "Not found", ha="center", va="center",
+                            transform=ax.transAxes)
+                site = row.get("anatom_site_general_challenge", "unknown")
+                sex  = row.get("sex", "?")
+                age  = row.get("age_approx", "?")
+                ax.set_title(f"FN | p={row['prob']:.2f}\n{site}\n{sex}, {age}y",
+                             fontsize=8, color="red")
+            ax.axis("off")
+
+    for col, (_, row) in enumerate(fp_subset.iterrows()):
+        for row_idx in range(2):
+            ax = axes[row_idx, col + n]
+            if row_idx == 0:
+                img_path = os.path.join(image_dir, row["image_name"] + ".png")
+                if not os.path.exists(img_path):
+                    img_path = os.path.join(image_dir, row["image_name"] + ".jpg")
+                try:
+                    img = Image.open(img_path).convert("RGB")
+                    ax.imshow(img)
+                except:
+                    ax.text(0.5, 0.5, "Not found", ha="center", va="center",
+                            transform=ax.transAxes)
+                site = row.get("anatom_site_general_challenge", "unknown")
+                sex  = row.get("sex", "?")
+                age  = row.get("age_approx", "?")
+                ax.set_title(f"FP | p={row['prob']:.2f}\n{site}\n{sex}, {age}y",
+                             fontsize=8, color="orange")
+            ax.axis("off")
+
+    # Trennlinie zwischen FN und FP
+    fig.text(0.5, 1.01, "False Negatives (missed melanomas)          |          False Positives (false alarm)",
+             ha="center", fontsize=12, fontweight="bold")
+
+    plt.suptitle("Error Examples – Melanoma Classification", fontsize=13, y=1.05)
+    plt.tight_layout()
+    save_path = os.path.join(output_dir, "examples_combined.png")
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"Kombinierte Beispielbilder gespeichert: {save_path}")
+
 
 # =============================================================================
 # MAIN
@@ -353,6 +412,8 @@ def main():
     print("\nSpeichere Beispielbilder...")
     save_example_images(df, "FN", args.data_dir, output_dir, n=args.n_examples)
     save_example_images(df, "FP", args.data_dir, output_dir, n=args.n_examples)
+    save_combined_examples(df, args.data_dir, output_dir, n=4)
+
 
     print(f"\n✅ Error Analysis gespeichert in: results/{args.model}/error_analysis/")
 

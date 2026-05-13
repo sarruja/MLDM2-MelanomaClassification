@@ -261,25 +261,42 @@ def compute_metrics(probs, labels, threshold):
 def plot_training_history(df, save_path):
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
+    # Epochen berechnen (Index = Steps, ~2000 Steps pro Epoche)
+    steps_per_epoch = len(df) / 7  # ~7 Epochen total
+    epoch_ticks = [int(i * steps_per_epoch) for i in range(8)]
+    epoch_labels = [str(i) for i in range(8)]
+
     if "train_loss" in df.columns:
         axes[0].plot(df.index, df["train_loss"], label="Train Loss", color="#7F77DD")
     if "val_loss" in df.columns:
         axes[0].plot(df.index, df["val_loss"], label="Val Loss", color="#E8735A")
-    axes[0].set_xlabel("Epoch")
+    axes[0].set_xlabel("Steps")
     axes[0].set_ylabel("Loss")
     axes[0].set_title("Training & Validation Loss")
     axes[0].legend()
     axes[0].grid(alpha=0.3)
+    # Zweite X-Achse für Epochen
+    ax0b = axes[0].twiny()
+    ax0b.set_xlim(axes[0].get_xlim())
+    ax0b.set_xticks(epoch_ticks)
+    ax0b.set_xticklabels(epoch_labels)
+    ax0b.set_xlabel("Epoch")
 
     if "val_auc" in df.columns:
         axes[1].plot(df.index, df["val_auc"], label="Val AUC-ROC", color="#1D9E75")
     if "val_f1" in df.columns:
         axes[1].plot(df.index, df["val_f1"], label="Val F1-Score", color="#F5A623")
-    axes[1].set_xlabel("Epoch")
+    axes[1].set_xlabel("Steps")
     axes[1].set_ylabel("Score")
     axes[1].set_title("Validation AUC-ROC & F1-Score")
     axes[1].legend()
     axes[1].grid(alpha=0.3)
+    # Zweite X-Achse für Epochen
+    ax1b = axes[1].twiny()
+    ax1b.set_xlim(axes[1].get_xlim())
+    ax1b.set_xticks(epoch_ticks)
+    ax1b.set_xticklabels(epoch_labels)
+    ax1b.set_xlabel("Epoch")
 
     plt.suptitle("Training History – Melanoma Classification", fontsize=14)
     plt.tight_layout()
@@ -336,6 +353,19 @@ def plot_confusion_matrix_comparison(probs, labels, threshold_default, threshold
     print(f"Confusion Matrix gespeichert: {save_path}")
 
 
+def plot_confusion_matrix_single(probs, labels, threshold, save_path):
+    preds = (probs >= threshold).astype(int)
+    cm    = confusion_matrix(labels, preds)
+    fig, ax = plt.subplots(figsize=(6, 5))
+    disp = ConfusionMatrixDisplay(cm, display_labels=["Benign", "Melanoma"])
+    disp.plot(ax=ax, colorbar=False, cmap="Blues")
+    ax.set_title(f"Confusion Matrix (Threshold = {threshold})", fontsize=13)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150)
+    plt.close()
+    print(f"Confusion Matrix gespeichert: {save_path}")
+
+
 def plot_precision_recall(probs, labels, threshold, save_path):
     precision, recall, thresholds_pr = precision_recall_curve(labels, probs)
     avg_precision = average_precision_score(labels, probs)
@@ -359,6 +389,48 @@ def plot_precision_recall(probs, labels, threshold, save_path):
     plt.savefig(save_path, dpi=150)
     plt.close()
     print(f"Precision-Recall Curve gespeichert: {save_path}")
+
+
+def plot_roc_and_pr(probs, labels, threshold, save_path):
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+
+    # --- ROC ---
+    fpr, tpr, thresholds_roc = roc_curve(labels, probs)
+    roc_auc = auc(fpr, tpr)
+    idx_roc = np.argmin(np.abs(thresholds_roc - threshold))
+    axes[0].plot(fpr, tpr, color="#7F77DD", lw=2,
+                 label=f"ROC Curve (AUC = {roc_auc:.4f})")
+    axes[0].plot([0, 1], [0, 1], color="gray", linestyle="--", lw=1,
+                 label="Random (AUC = 0.5)")
+    axes[0].scatter(fpr[idx_roc], tpr[idx_roc], color="#E8735A", s=100, zorder=5,
+                    label=f"Threshold = {threshold:.2f}")
+    axes[0].set_xlabel("False Positive Rate", fontsize=12)
+    axes[0].set_ylabel("True Positive Rate", fontsize=12)
+    axes[0].set_title("ROC Curve", fontsize=13)
+    axes[0].legend(loc="lower right", fontsize=10)
+    axes[0].grid(alpha=0.3)
+
+    # --- Precision-Recall ---
+    precision, recall, thresholds_pr = precision_recall_curve(labels, probs)
+    avg_precision = average_precision_score(labels, probs)
+    idx_pr = np.argmin(np.abs(thresholds_pr - threshold))
+    axes[1].plot(recall, precision, color="#1D9E75", lw=2,
+                 label=f"PR Curve (AP = {avg_precision:.4f})")
+    axes[1].scatter(recall[idx_pr], precision[idx_pr], color="#E8735A", s=100, zorder=5,
+                    label=f"Threshold = {threshold:.2f}")
+    axes[1].axhline(y=labels.mean(), color="gray", linestyle="--", lw=1,
+                    label=f"Random (AP = {labels.mean():.4f})")
+    axes[1].set_xlabel("Recall", fontsize=12)
+    axes[1].set_ylabel("Precision", fontsize=12)
+    axes[1].set_title("Precision-Recall Curve", fontsize=13)
+    axes[1].legend(loc="upper right", fontsize=10)
+    axes[1].grid(alpha=0.3)
+
+    plt.suptitle("ROC and Precision-Recall Curves – Melanoma Classification", fontsize=14)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150)
+    plt.close()
+    print(f"ROC + PR Curve gespeichert: {save_path}")
 
 
 def threshold_comparison_table(test_probs, test_labels, save_path=None):
@@ -562,10 +634,18 @@ def main():
     # ---- Plots (mit Sensitivity-Threshold als Hauptthreshold) ----
     plot_roc_curve(test_probs, test_labels, sens_threshold,
                    os.path.join(output_dir, "roc_curve.png"))
+    
     plot_confusion_matrix_comparison(test_probs, test_labels, 0.5, sens_threshold,
                                      os.path.join(output_dir, "confusion_matrix.png"))
+    
+    plot_confusion_matrix_single(test_probs, test_labels, 0.5,
+                             os.path.join(output_dir, "confusion_matrix.png"))
+    
     plot_precision_recall(test_probs, test_labels, sens_threshold,
                           os.path.join(output_dir, "precision_recall_curve.png"))
+    
+    plot_roc_and_pr(test_probs, test_labels, sens_threshold,
+                os.path.join(output_dir, "roc_pr_curves.png"))
 
     plot_error_analysis(
     args.model, args.checkpoint, args.data_dir, args.batch_size,
