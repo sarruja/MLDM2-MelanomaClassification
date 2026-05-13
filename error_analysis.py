@@ -324,65 +324,29 @@ def save_example_images(df, error_type, data_dir, output_dir, n=8):
     plt.close()
     print(f"Beispielbilder {error_type} gespeichert: {save_path}")
 
-def save_combined_examples(df, data_dir, output_dir, n=4):
-    """FN links, FP rechts – nebeneinander in einer Grafik."""
-    fn_subset = df[df["error_type"] == "FN"].nsmallest(n, "prob")
-    fp_subset  = df[df["error_type"] == "FP"].nlargest(n, "prob")
+def combine_example_images(output_dir):
+    """Lädt examples_fn.png und examples_fp.png und kombiniert sie nebeneinander."""
+    fn_path = os.path.join(output_dir, "examples_fn.png")
+    fp_path = os.path.join(output_dir, "examples_fp.png")
 
-    fig, axes = plt.subplots(2, n * 2, figsize=(3 * n * 2, 7))
-    image_dir = os.path.join(data_dir, "train")
+    fn_img = Image.open(fn_path)
+    fp_img = Image.open(fp_path)
 
-    for col, (_, row) in enumerate(fn_subset.iterrows()):
-        for row_idx in range(2):
-            ax = axes[row_idx, col]
-            if row_idx == 0:
-                img_path = os.path.join(image_dir, row["image_name"] + ".png")
-                if not os.path.exists(img_path):
-                    img_path = os.path.join(image_dir, row["image_name"] + ".jpg")
-                try:
-                    img = Image.open(img_path).convert("RGB")
-                    ax.imshow(img)
-                except:
-                    ax.text(0.5, 0.5, "Not found", ha="center", va="center",
-                            transform=ax.transAxes)
-                site = row.get("anatom_site_general_challenge", "unknown")
-                sex  = row.get("sex", "?")
-                age  = row.get("age_approx", "?")
-                ax.set_title(f"FN | p={row['prob']:.2f}\n{site}\n{sex}, {age}y",
-                             fontsize=8, color="red")
-            ax.axis("off")
+    # Gleiche Höhe sicherstellen
+    height = max(fn_img.height, fp_img.height)
+    fn_img = fn_img.resize((int(fn_img.width * height / fn_img.height), height))
+    fp_img = fp_img.resize((int(fp_img.width * height / fp_img.height), height))
 
-    for col, (_, row) in enumerate(fp_subset.iterrows()):
-        for row_idx in range(2):
-            ax = axes[row_idx, col + n]
-            if row_idx == 0:
-                img_path = os.path.join(image_dir, row["image_name"] + ".png")
-                if not os.path.exists(img_path):
-                    img_path = os.path.join(image_dir, row["image_name"] + ".jpg")
-                try:
-                    img = Image.open(img_path).convert("RGB")
-                    ax.imshow(img)
-                except:
-                    ax.text(0.5, 0.5, "Not found", ha="center", va="center",
-                            transform=ax.transAxes)
-                site = row.get("anatom_site_general_challenge", "unknown")
-                sex  = row.get("sex", "?")
-                age  = row.get("age_approx", "?")
-                ax.set_title(f"FP | p={row['prob']:.2f}\n{site}\n{sex}, {age}y",
-                             fontsize=8, color="orange")
-            ax.axis("off")
+    # Nebeneinander zusammenfügen
+    combined = Image.new("RGB", (fn_img.width + fp_img.width, height), color="white")
+    combined.paste(fn_img, (0, 0))
+    combined.paste(fp_img, (fn_img.width, 0))
 
-    # Trennlinie zwischen FN und FP
-    fig.text(0.5, 1.01, "False Negatives (missed melanomas)          |          False Positives (false alarm)",
-             ha="center", fontsize=12, fontweight="bold")
-
-    plt.suptitle("Error Examples – Melanoma Classification", fontsize=13, y=1.05)
-    plt.tight_layout()
     save_path = os.path.join(output_dir, "examples_combined.png")
-    plt.savefig(save_path, dpi=150, bbox_inches="tight")
-    plt.close()
+    combined.save(save_path, dpi=(150, 150))
     print(f"Kombinierte Beispielbilder gespeichert: {save_path}")
 
+ 
 
 # =============================================================================
 # MAIN
@@ -412,8 +376,7 @@ def main():
     print("\nSpeichere Beispielbilder...")
     save_example_images(df, "FN", args.data_dir, output_dir, n=args.n_examples)
     save_example_images(df, "FP", args.data_dir, output_dir, n=args.n_examples)
-    save_combined_examples(df, args.data_dir, output_dir, n=4)
-
+    combine_example_images(output_dir)
 
     print(f"\n✅ Error Analysis gespeichert in: results/{args.model}/error_analysis/")
 

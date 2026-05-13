@@ -262,7 +262,11 @@ def plot_training_history(df, save_path):
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
     # Epochen berechnen (Index = Steps, ~2000 Steps pro Epoche)
-    steps_per_epoch = len(df) / 7  # ~7 Epochen total
+    total_steps = df.index.max()
+    n_epochs = 7
+    steps_per_epoch = total_steps / n_epochs
+    epoch_ticks = [int(i * steps_per_epoch) for i in range(n_epochs + 1)]
+    epoch_labels = [str(i) for i in range(n_epochs + 1)]
     epoch_ticks = [int(i * steps_per_epoch) for i in range(8)]
     epoch_labels = [str(i) for i in range(8)]
 
