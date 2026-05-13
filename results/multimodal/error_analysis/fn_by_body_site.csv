@@ -1,8 +1,8 @@
 anatom_site_general_challenge,FN Count,Total Melanome,FN Rate (%)
 oral/genital,1,1,100.0
 unknown,1,1,100.0
-upper extremity,11,16,68.8
-torso,25,39,64.1
-lower extremity,10,18,55.6
-head/neck,5,10,50.0
 palms/soles,1,2,50.0
+torso,16,39,41.0
+upper extremity,6,16,37.5
+lower extremity,5,18,27.8
+head/neck,2,10,20.0

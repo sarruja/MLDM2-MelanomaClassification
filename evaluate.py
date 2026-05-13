@@ -473,8 +473,8 @@ def plot_error_analysis(model_type, checkpoint_path, data_dir, batch_size, thres
         axes[1, col].set_title(f"FN | p={probs[idx]:.2f}", color="red")
         axes[1, col].axis("off")
 
-    axes[0, 0].set_ylabel("False Positives\n(Benign → Melanom)", fontsize=11, color="orange")
-    axes[1, 0].set_ylabel("False Negatives\n(Melanom verpasst!)", fontsize=11, color="red")
+    axes[0, 0].set_ylabel("False Positives\n(Benign → Melanoma)", fontsize=11, color="orange")
+    axes[1, 0].set_ylabel("False Negatives\n(Missed Melanoma!)", fontsize=11, color="red")
 
     plt.tight_layout()
     plt.savefig(save_path, dpi=150)

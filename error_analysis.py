@@ -48,7 +48,7 @@ def parse_args():
     parser.add_argument("--threshold", type=float, default=0.5,
                         help="Threshold für Klassifikation (default: 0.5)")
     parser.add_argument("--n_examples", type=int, default=8,
-                        help="Anzahl Beispielbilder pro Fehlertyp")
+                        help="Count Beispielbilder pro Fehlertyp")
     return parser.parse_args()
 
 
@@ -163,7 +163,7 @@ def analyze_patterns(df, output_dir):
     tp_df = df[df["error_type"] == "TP"]  # korrekt erkannte Melanome
 
     fig, axes = plt.subplots(2, 3, figsize=(18, 10))
-    fig.suptitle("Error Analysis – Fehlermuster", fontsize=15)
+    fig.suptitle("Error Analysis – Error Patterns", fontsize=15)
 
     # ---- 1. Body Site Verteilung ----
     site_col = "anatom_site_general_challenge"
@@ -171,14 +171,14 @@ def analyze_patterns(df, output_dir):
         for ax, subset, title, color in zip(
             axes[0],
             [fn_df, fp_df, tp_df],
-            ["False Negatives\n(verpasste Melanome)", "False Positives\n(falscher Alarm)", "True Positives\n(korrekt erkannt)"],
+            ["False Negatives\n(missed melanomas)", "False Positives\n(false alarm)", "True Positives\n(correctly detected)"],
             ["#E8735A", "#7F77DD", "#1D9E75"]
         ):
             counts = subset[site_col].fillna("unknown").value_counts()
             counts.plot(kind="bar", ax=ax, color=color, alpha=0.8)
             ax.set_title(title, fontsize=11)
             ax.set_xlabel("Body Site")
-            ax.set_ylabel("Anzahl")
+            ax.set_ylabel("Count")
             ax.tick_params(axis="x", rotation=45)
             ax.grid(axis="y", alpha=0.3)
 
@@ -187,16 +187,16 @@ def analyze_patterns(df, output_dir):
     if age_col in df.columns:
         ax = axes[1][0]
         for subset, label, color in [
-            (fn_df, "FN (verpasst)", "#E8735A"),
-            (fp_df, "FP (falscher Alarm)", "#7F77DD"),
-            (tp_df, "TP (korrekt)", "#1D9E75"),
+            (fn_df, "FN (missed)", "#E8735A"),
+            (fp_df, "FP (false alarm)", "#7F77DD"),
+            (tp_df, "TP (correct)", "#1D9E75"),
         ]:
             ages = subset[age_col].dropna()
             if len(ages) > 0:
                 ax.hist(ages, bins=10, alpha=0.6, label=label, color=color)
-        ax.set_title("Altersverteilung nach Fehlertyp")
-        ax.set_xlabel("Alter")
-        ax.set_ylabel("Anzahl")
+        ax.set_title("Age Distribution by Error Type")
+        ax.set_xlabel("Age")
+        ax.set_ylabel("Count")
         ax.legend()
         ax.grid(alpha=0.3)
 
@@ -217,23 +217,23 @@ def analyze_patterns(df, output_dir):
             ax.bar(x + i * width, counts, width, label=etype, color=color, alpha=0.8)
         ax.set_xticks(x + width * 1.5)
         ax.set_xticklabels(sexes)
-        ax.set_title("Geschlecht nach Fehlertyp")
-        ax.set_ylabel("Anzahl")
+        ax.set_title("Sex by Error Type")
+        ax.set_ylabel("Count")
         ax.legend()
         ax.grid(axis="y", alpha=0.3)
 
     # ---- 4. Confidence-Verteilung ----
     ax = axes[1][2]
     for subset, label, color in [
-        (fn_df, "FN (verpasst)", "#E8735A"),
-        (fp_df, "FP (falscher Alarm)", "#7F77DD"),
-        (tp_df, "TP (korrekt)", "#1D9E75"),
+        (fn_df, "FN (missed)", "#E8735A"),
+        (fp_df, "FP (false alarm)", "#7F77DD"),
+        (tp_df, "TP (correct)", "#1D9E75"),
     ]:
         if len(subset) > 0:
             ax.hist(subset["prob"], bins=15, alpha=0.6, label=label, color=color)
-    ax.set_title("Modell-Confidence nach Fehlertyp")
+    ax.set_title("Modell-Confidence by Error Type")
     ax.set_xlabel("Predicted Probability")
-    ax.set_ylabel("Anzahl")
+    ax.set_ylabel("Count")
     ax.legend()
     ax.grid(alpha=0.3)
 
@@ -282,11 +282,11 @@ def save_example_images(df, error_type, data_dir, output_dir, n=8):
     if error_type == "FN":
         # FN: Modell hat niedrige Prob → sortiere nach niedrigster Prob (sicherste FN)
         subset = subset.nsmallest(n, "prob")
-        title_suffix = "(Modell war sicher: kein Melanom)"
+        title_suffix = "(Model was confident: no melanoma)"
     else:
         # FP: Modell hat hohe Prob → sortiere nach höchster Prob
         subset = subset.nlargest(n, "prob")
-        title_suffix = "(Modell war sicher: Melanom)"
+        title_suffix = "(Model was confident: melanoma)"
 
     n_show = min(n, len(subset))
     fig, axes = plt.subplots(2, n_show // 2, figsize=(3 * (n_show // 2), 7))
@@ -315,7 +315,7 @@ def save_example_images(df, error_type, data_dir, output_dir, n=8):
         )
         axes[i].axis("off")
 
-    error_label = "False Negatives (verpasste Melanome)" if error_type == "FN" else "False Positives (falscher Alarm)"
+    error_label = "False Negatives (missed melanomas)" if error_type == "FN" else "False Positives (false alarm)"
     fig.suptitle(f"{error_label}\n{title_suffix}", fontsize=12)
     plt.tight_layout()
 
