@@ -346,7 +346,27 @@ def combine_example_images(output_dir):
     combined.save(save_path, dpi=(150, 150))
     print(f"Kombinierte Beispielbilder gespeichert: {save_path}")
 
- 
+def combine_example_images_vertical(output_dir):
+    """Lädt examples_fn.png und examples_fp.png und stapelt sie übereinander."""
+    fn_path = os.path.join(output_dir, "examples_fn.png")
+    fp_path = os.path.join(output_dir, "examples_fp.png")
+
+    fn_img = Image.open(fn_path)
+    fp_img = Image.open(fp_path)
+
+    # Gleiche Breite sicherstellen
+    width = max(fn_img.width, fp_img.width)
+    fn_img = fn_img.resize((width, int(fn_img.height * width / fn_img.width)))
+    fp_img = fp_img.resize((width, int(fp_img.height * width / fp_img.width)))
+
+    # Übereinander zusammenfügen
+    combined = Image.new("RGB", (width, fn_img.height + fp_img.height), color="white")
+    combined.paste(fn_img, (0, 0))
+    combined.paste(fp_img, (0, fn_img.height))
+
+    save_path = os.path.join(output_dir, "examples_combined_vertical.png")
+    combined.save(save_path, dpi=(150, 150))
+    print(f"Vertikale Beispielbilder gespeichert: {save_path}")
 
 # =============================================================================
 # MAIN
@@ -377,7 +397,8 @@ def main():
     save_example_images(df, "FN", args.data_dir, output_dir, n=args.n_examples)
     save_example_images(df, "FP", args.data_dir, output_dir, n=args.n_examples)
     combine_example_images(output_dir)
-
+    combine_example_images_vertical(output_dir)
+    
     print(f"\n✅ Error Analysis gespeichert in: results/{args.model}/error_analysis/")
 
 
