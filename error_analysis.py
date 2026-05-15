@@ -156,52 +156,38 @@ def classify_errors(df, threshold):
 # Wo macht das Modell die meisten Fehler?
 # =============================================================================
 def analyze_patterns(df, output_dir):
-    """Analysiert Fehlermuster nach Körperstelle, Alter, Confidence."""
-
     fn_df = df[df["error_type"] == "FN"]
     fp_df = df[df["error_type"] == "FP"]
     tp_df = df[df["error_type"] == "TP"]
 
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-    fig.suptitle("Error Analysis – Error Patterns", fontsize=15)
+    fig, axes = plt.subplots(1, 2, figsize=(16, 7))
+    fig.suptitle("Error Analysis – Error Patterns", fontsize=18, fontweight="bold")
 
-    # ---- 1. Body Site Verteilung (FN und FP) ----
+    # ---- 1. Body Site – FN und FP als gruppierte Bars ----
     site_col = "anatom_site_general_challenge"
     if site_col in df.columns:
-        for ax, subset, title, color in zip(
-            axes[0],
-            [fn_df, fp_df],
-            ["False Negatives\n(missed melanomas)", "False Positives\n(false alarm)"],
-            ["#E8735A", "#7F77DD"]
-        ):
-            counts = subset[site_col].fillna("unknown").value_counts()
-            counts.plot(kind="bar", ax=ax, color=color, alpha=0.8)
-            ax.set_title(title, fontsize=11)
-            ax.set_xlabel("Body Site")
-            ax.set_ylabel("Count")
-            ax.tick_params(axis="x", rotation=45)
-            ax.grid(axis="y", alpha=0.3)
+        ax = axes[0]
+        sites = df[site_col].fillna("unknown").unique()
+        fn_counts = fn_df[site_col].fillna("unknown").value_counts().reindex(sites, fill_value=0)
+        fp_counts = fp_df[site_col].fillna("unknown").value_counts().reindex(sites, fill_value=0)
+        order = fn_counts.sort_values(ascending=False).index
+        fn_counts = fn_counts[order]
+        fp_counts = fp_counts[order]
+        x = np.arange(len(order))
+        width = 0.4
+        ax.bar(x - width/2, fn_counts, width, label="FN (missed)", color="#E8735A", alpha=0.85)
+        ax.bar(x + width/2, fp_counts, width, label="FP (false alarm)", color="#7F77DD", alpha=0.85)
+        ax.set_xticks(x)
+        ax.set_xticklabels(order, rotation=45, ha="right", fontsize=12)
+        ax.set_title("Errors by Body Site", fontsize=15, fontweight="bold")
+        ax.set_xlabel("Body Site", fontsize=13)
+        ax.set_ylabel("Count", fontsize=13)
+        ax.legend(fontsize=12)
+        ax.tick_params(axis="y", labelsize=12)
+        ax.grid(axis="y", alpha=0.3)
 
-    # ---- 2. Altersverteilung ----
-    age_col = "age_approx"
-    if age_col in df.columns:
-        ax = axes[1][0]
-        for subset, label, color in [
-            (fn_df, "FN (missed)", "#E8735A"),
-            (fp_df, "FP (false alarm)", "#7F77DD"),
-            (tp_df, "TP (correct)", "#1D9E75"),
-        ]:
-            ages = subset[age_col].dropna()
-            if len(ages) > 0:
-                ax.hist(ages, bins=10, alpha=0.6, label=label, color=color)
-        ax.set_title("Age Distribution by Error Type")
-        ax.set_xlabel("Age")
-        ax.set_ylabel("Count")
-        ax.legend()
-        ax.grid(alpha=0.3)
-
-    # ---- 3. Confidence-Verteilung ----
-    ax = axes[1][1]
+    # ---- 2. Confidence-Verteilung ----
+    ax = axes[1]
     for subset, label, color in [
         (fn_df, "FN (missed)", "#E8735A"),
         (fp_df, "FP (false alarm)", "#7F77DD"),
@@ -209,10 +195,11 @@ def analyze_patterns(df, output_dir):
     ]:
         if len(subset) > 0:
             ax.hist(subset["prob"], bins=15, alpha=0.6, label=label, color=color)
-    ax.set_title("Model Confidence by Error Type")
-    ax.set_xlabel("Predicted Probability")
-    ax.set_ylabel("Count")
-    ax.legend()
+    ax.set_title("Model Confidence by Error Type", fontsize=15, fontweight="bold")
+    ax.set_xlabel("Predicted Probability", fontsize=13)
+    ax.set_ylabel("Count", fontsize=13)
+    ax.legend(fontsize=12)
+    ax.tick_params(labelsize=12)
     ax.grid(alpha=0.3)
 
     plt.tight_layout()
@@ -237,42 +224,44 @@ def analyze_patterns(df, output_dir):
 
     return fn_df, fp_df
 
-
 # =============================================================================
 # BEISPIELBILDER SPEICHERN
 # Zeigt die "härtesten" Fehler — wo das Modell am sichersten falsch war
 # =============================================================================
 def save_example_images(df, error_type, data_dir, output_dir, n=8):
-    """
-    Speichert n Beispielbilder des gegebenen Fehlertyps.
-    Sortiert nach Confidence (härteste Fehler zuerst):
-    - FN: höchste Probability (Modell war fast sicher, aber falsch)
-    - FP: höchste Probability (Modell war sehr sicher dass es Melanom ist)
-    """
     subset = df[df["error_type"] == error_type].copy()
 
     if len(subset) == 0:
         print(f"Keine {error_type} Beispiele gefunden.")
         return
 
-    # Härteste Fehler zuerst
+    # Härteste Fehler auswählen
     if error_type == "FN":
-        # FN: Modell hat niedrige Prob → sortiere nach niedrigster Prob (sicherste FN)
         subset = subset.nsmallest(n, "prob")
-        title_suffix = "(Model was confident: no melanoma)"
+        title = "False Negatives – Model was confident: no melanoma"
     else:
-        # FP: Modell hat hohe Prob → sortiere nach höchster Prob
         subset = subset.nlargest(n, "prob")
-        title_suffix = "(Model was confident: melanoma)"
+        title = "False Positives – Model was confident: melanoma"
 
-    fig, axes = plt.subplots(1, 4, figsize=(16, 5))
-    axes = axes.flatten()
+    # Nur 4 Beispiele anzeigen
     subset = subset.head(4)
-    
+
+    fig, axes = plt.subplots(1, 4, figsize=(14, 3.8))
+    axes = axes.flatten()
+
+    # Titel näher an Bilder
+    fig.suptitle(
+        title,
+        fontsize=15,
+        fontweight="bold",
+        y=0.95
+    )
+
     image_dir = os.path.join(data_dir, "train")
 
     for i, (_, row) in enumerate(subset.iterrows()):
         img_path = os.path.join(image_dir, row["image_name"] + ".png")
+
         if not os.path.exists(img_path):
             img_path = os.path.join(image_dir, row["image_name"] + ".jpg")
 
@@ -280,25 +269,62 @@ def save_example_images(df, error_type, data_dir, output_dir, n=8):
             img = Image.open(img_path).convert("RGB")
             axes[i].imshow(img)
         except:
-            axes[i].text(0.5, 0.5, "Bild nicht\ngefunden",
-                        ha="center", va="center", transform=axes[i].transAxes)
+            axes[i].text(
+                0.5, 0.5,
+                "Not found",
+                ha="center",
+                va="center",
+                transform=axes[i].transAxes
+            )
 
         site = row.get("anatom_site_general_challenge", "unknown")
         sex  = row.get("sex", "?")
         age  = row.get("age_approx", "?")
-        axes[i].set_title(
-            f"p={row['prob']:.2f}\n{site}\n{sex}, {age}y",
-            fontsize=8
+
+        age_str = str(int(age)) if age != "?" else "?"
+
+        # Grössere, besser lesbare Labels
+        axes[i].text(
+            0.98,
+            0.98,
+            f"p={row['prob']:.2f}\n{site}\n{sex}, {age_str}y",
+            transform=axes[i].transAxes,
+            fontsize=12,
+            fontweight="normal",
+            verticalalignment="top",
+            horizontalalignment="right",
+            color="white",
+            bbox=dict(
+                boxstyle="round,pad=0.35",
+                facecolor="black",
+                alpha=0.55
+            )
         )
+
         axes[i].axis("off")
 
-    error_label = "False Negatives (missed melanomas)" if error_type == "FN" else "False Positives (false alarm)"
-    fig.suptitle(f"{error_label}\n{title_suffix}", fontsize=12)
-    plt.tight_layout()
+    # Weniger Abstand zwischen Bildern
+    plt.subplots_adjust(
+        left=0.02,
+        right=0.98,
+        top=0.88,
+        bottom=0.02,
+        wspace=0.04
+    )
 
-    save_path = os.path.join(output_dir, f"examples_{error_type.lower()}.png")
-    plt.savefig(save_path, dpi=150)
+    save_path = os.path.join(
+        output_dir,
+        f"examples_{error_type.lower()}.png"
+    )
+
+    plt.savefig(
+        save_path,
+        dpi=150,
+        bbox_inches="tight"
+    )
+
     plt.close()
+
     print(f"Beispielbilder {error_type} gespeichert: {save_path}")
 
 def combine_example_images(output_dir):
@@ -324,26 +350,26 @@ def combine_example_images(output_dir):
     print(f"Kombinierte Beispielbilder gespeichert: {save_path}")
 
 def combine_example_images_vertical(output_dir):
-    """Lädt examples_fn.png und examples_fp.png und stapelt sie übereinander."""
     fn_path = os.path.join(output_dir, "examples_fn.png")
     fp_path = os.path.join(output_dir, "examples_fp.png")
 
     fn_img = Image.open(fn_path)
     fp_img = Image.open(fp_path)
 
-    # Gleiche Breite sicherstellen
     width = max(fn_img.width, fp_img.width)
     fn_img = fn_img.resize((width, int(fn_img.height * width / fn_img.width)))
     fp_img = fp_img.resize((width, int(fp_img.height * width / fp_img.width)))
 
-    # Übereinander zusammenfügen
-    combined = Image.new("RGB", (width, fn_img.height + fp_img.height), color="white")
+    # Minimaler Abstand zwischen den zwei Bildern
+    padding = 1
+    combined = Image.new("RGB", (width, fn_img.height + fp_img.height + padding), color="white")
     combined.paste(fn_img, (0, 0))
-    combined.paste(fp_img, (0, fn_img.height))
+    combined.paste(fp_img, (0, fn_img.height + padding))
 
     save_path = os.path.join(output_dir, "examples_combined_vertical.png")
     combined.save(save_path, dpi=(150, 150))
     print(f"Vertikale Beispielbilder gespeichert: {save_path}")
+
 
 # =============================================================================
 # MAIN
