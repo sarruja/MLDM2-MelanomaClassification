@@ -156,23 +156,23 @@ def classify_errors(df, threshold):
 # Wo macht das Modell die meisten Fehler?
 # =============================================================================
 def analyze_patterns(df, output_dir):
-    """Analysiert Fehlermuster nach Körperstelle, Geschlecht, Alter."""
+    """Analysiert Fehlermuster nach Körperstelle, Alter, Confidence."""
 
-    fn_df = df[df["error_type"] == "FN"]  # verpasste Melanome
-    fp_df = df[df["error_type"] == "FP"]  # falscher Alarm
-    tp_df = df[df["error_type"] == "TP"]  # korrekt erkannte Melanome
+    fn_df = df[df["error_type"] == "FN"]
+    fp_df = df[df["error_type"] == "FP"]
+    tp_df = df[df["error_type"] == "TP"]
 
-    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
     fig.suptitle("Error Analysis – Error Patterns", fontsize=15)
 
-    # ---- 1. Body Site Verteilung ----
+    # ---- 1. Body Site Verteilung (FN und FP) ----
     site_col = "anatom_site_general_challenge"
     if site_col in df.columns:
         for ax, subset, title, color in zip(
             axes[0],
-            [fn_df, fp_df, tp_df],
-            ["False Negatives\n(missed melanomas)", "False Positives\n(false alarm)", "True Positives\n(correctly detected)"],
-            ["#E8735A", "#7F77DD", "#1D9E75"]
+            [fn_df, fp_df],
+            ["False Negatives\n(missed melanomas)", "False Positives\n(false alarm)"],
+            ["#E8735A", "#7F77DD"]
         ):
             counts = subset[site_col].fillna("unknown").value_counts()
             counts.plot(kind="bar", ax=ax, color=color, alpha=0.8)
@@ -200,30 +200,8 @@ def analyze_patterns(df, output_dir):
         ax.legend()
         ax.grid(alpha=0.3)
 
-    # ---- 3. Geschlechtsverteilung ----
-    sex_col = "sex"
-    if sex_col in df.columns:
-        ax = axes[1][1]
-        error_types = ["FN", "FP", "TP", "TN"]
-        colors = ["#E8735A", "#7F77DD", "#1D9E75", "#888780"]
-        x = np.arange(2)
-        width = 0.2
-        sexes = ["male", "female"]
-        for i, (etype, color) in enumerate(zip(error_types, colors)):
-            subset = df[df["error_type"] == etype]
-            counts = [
-                (subset["sex"] == s).sum() for s in sexes
-            ]
-            ax.bar(x + i * width, counts, width, label=etype, color=color, alpha=0.8)
-        ax.set_xticks(x + width * 1.5)
-        ax.set_xticklabels(sexes)
-        ax.set_title("Sex by Error Type")
-        ax.set_ylabel("Count")
-        ax.legend()
-        ax.grid(axis="y", alpha=0.3)
-
-    # ---- 4. Confidence-Verteilung ----
-    ax = axes[1][2]
+    # ---- 3. Confidence-Verteilung ----
+    ax = axes[1][1]
     for subset, label, color in [
         (fn_df, "FN (missed)", "#E8735A"),
         (fp_df, "FP (false alarm)", "#7F77DD"),
@@ -231,7 +209,7 @@ def analyze_patterns(df, output_dir):
     ]:
         if len(subset) > 0:
             ax.hist(subset["prob"], bins=15, alpha=0.6, label=label, color=color)
-    ax.set_title("Modell-Confidence by Error Type")
+    ax.set_title("Model Confidence by Error Type")
     ax.set_xlabel("Predicted Probability")
     ax.set_ylabel("Count")
     ax.legend()
@@ -246,7 +224,6 @@ def analyze_patterns(df, output_dir):
     # ---- Tabelle: FN nach Body Site ----
     site_col = "anatom_site_general_challenge"
     if site_col in df.columns:
-        print("\n📊 False Negatives nach Körperstelle:")
         fn_by_site = fn_df[site_col].fillna("unknown").value_counts()
         total_by_site = df[df["label"] == 1][site_col].fillna("unknown").value_counts()
         fn_rate = (fn_by_site / total_by_site * 100).round(1)
@@ -288,10 +265,10 @@ def save_example_images(df, error_type, data_dir, output_dir, n=8):
         subset = subset.nlargest(n, "prob")
         title_suffix = "(Model was confident: melanoma)"
 
-    n_show = min(n, len(subset))
-    fig, axes = plt.subplots(2, n_show // 2, figsize=(3 * (n_show // 2), 7))
+    fig, axes = plt.subplots(1, 4, figsize=(16, 5))
     axes = axes.flatten()
-
+    subset = subset.head(4)
+    
     image_dir = os.path.join(data_dir, "train")
 
     for i, (_, row) in enumerate(subset.iterrows()):
