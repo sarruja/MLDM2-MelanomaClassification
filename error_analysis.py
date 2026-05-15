@@ -160,7 +160,9 @@ def analyze_patterns(df, output_dir):
     fp_df = df[df["error_type"] == "FP"]
     tp_df = df[df["error_type"] == "TP"]
 
-    fig, axes = plt.subplots(1, 2, figsize=(16, 7))
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+    plt.tight_layout()
+
     fig.suptitle("Error Analysis – Error Patterns", fontsize=18, fontweight="bold")
 
     # ---- 1. Body Site – FN und FP als gruppierte Bars ----
@@ -204,7 +206,7 @@ def analyze_patterns(df, output_dir):
 
     plt.tight_layout()
     save_path = os.path.join(output_dir, "error_patterns.png")
-    plt.savefig(save_path, dpi=150)
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")  # entfernt Whitespace unten
     plt.close()
     print(f"Error Patterns gespeichert: {save_path}")
 
