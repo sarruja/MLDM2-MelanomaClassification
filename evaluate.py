@@ -259,7 +259,8 @@ def compute_metrics(probs, labels, threshold):
 # PLOTS
 # =============================================================================
 def plot_training_history(df, save_path):
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    fig, axes = plt.subplots(1, 2, figsize=(14, 4.5))
+    plt.suptitle("Training History – Melanoma Classification", fontsize=14, fontweight="bold", y=1.01)
 
     # Epochen berechnen (Index = Steps, ~2000 Steps pro Epoche)
     total_steps = df.index.max()
@@ -274,11 +275,22 @@ def plot_training_history(df, save_path):
         axes[0].plot(df.index, df["train_loss"], label="Train Loss", color="#7F77DD")
     if "val_loss" in df.columns:
         axes[0].plot(df.index, df["val_loss"], label="Val Loss", color="#E8735A")
-    axes[0].set_xlabel("Steps")
-    axes[0].set_ylabel("Loss")
-    axes[0].set_title("Training & Validation Loss")
-    axes[0].legend()
+
+
+    axes[0].set_xlabel("Steps", fontsize=12)
+    axes[0].set_ylabel("Loss", fontsize=12)
+    axes[0].set_title("Training & Validation Loss", fontsize=13, fontweight="bold")
+    axes[0].tick_params(labelsize=11)
+    axes[0].legend(fontsize=11)
     axes[0].grid(alpha=0.3)
+
+    axes[1].set_xlabel("Steps", fontsize=12)
+    axes[1].set_ylabel("Score", fontsize=12)
+    axes[1].set_title("Validation AUC-ROC & F1-Score", fontsize=13, fontweight="bold")
+    axes[1].tick_params(labelsize=11)
+    axes[1].legend(fontsize=11)
+
+        
     # Zweite X-Achse für Epochen
     ax0b = axes[0].twiny()
     ax0b.set_xlim(axes[0].get_xlim())
@@ -290,10 +302,6 @@ def plot_training_history(df, save_path):
         axes[1].plot(df.index, df["val_auc"], label="Val AUC-ROC", color="#1D9E75")
     if "val_f1" in df.columns:
         axes[1].plot(df.index, df["val_f1"], label="Val F1-Score", color="#F5A623")
-    axes[1].set_xlabel("Steps")
-    axes[1].set_ylabel("Score")
-    axes[1].set_title("Validation AUC-ROC & F1-Score")
-    axes[1].legend()
     axes[1].grid(alpha=0.3)
     # Zweite X-Achse für Epochen
     ax1b = axes[1].twiny()
@@ -302,9 +310,8 @@ def plot_training_history(df, save_path):
     ax1b.set_xticklabels(epoch_labels)
     ax1b.set_xlabel("Epoch")
 
-    plt.suptitle("Training History – Melanoma Classification", fontsize=14)
     plt.tight_layout()
-    plt.savefig(save_path, dpi=150)
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close()
     print(f"Training History Plot gespeichert: {save_path}")
 
